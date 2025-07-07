@@ -5,7 +5,7 @@ import time
 def upload_images_v1(image_paths: list[str]) -> list[str]:
     media_ids = []
     for path in image_paths:
-        media = api_v1.media_upload(path)
+        media = api_v1.media_upload("010029_01_img.jpg")
         media_ids.append(media.media_id_string)
     return media_ids
 
