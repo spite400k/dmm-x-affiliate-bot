@@ -18,6 +18,6 @@ def main():
     print(f"投稿完了：{post_id}")
 
 if __name__ == "__main__":
-    # main()
+    main()
     # test_post_text_only()
-    test_post_v2_with_image()
+    # test_post_v2_with_image()

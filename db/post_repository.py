@@ -1,8 +1,8 @@
 from db.supabase_client import supabase
 
 def get_next_post():
-    res = supabase.table("trn_posts").select("*").eq("posted", False).limit(1).execute()
+    res = supabase.table("trn_dmm_items").select("*").eq("is_posted", False).limit(1).execute()
     return res.data[0] if res.data else None
 
 def mark_post_as_posted(post_id: str):
-    supabase.table("trn_posts").update({"posted": True}).eq("id", post_id).execute()
+    supabase.table("trn_dmm_items").update({"is_posted": True}).eq("id", post_id).execute()
