@@ -14,7 +14,7 @@ def main():
     summary = post['auto_summary']  # カラム名が comment ならそのままでOK
     point = post['auto_point']  # カラム名が comment ならそのままでOK
 
-    post_full_thread(comment, image_urls, affiliate_url)
+    post_full_thread(comment, image_urls, affiliate_url, point, summary)
 
     mark_post_as_posted(item_id)
     print(f"✅ 投稿完了：{item_id}")

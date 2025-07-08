@@ -4,7 +4,8 @@ import time
 import os
 import time
 import logging
-
+import io
+import requests
 # ---------------------
 # ログ設定
 # ---------------------
@@ -22,7 +23,25 @@ logger = logging.getLogger(__name__)
 # ---------------------
 # メディアアップロード（v1.1）
 # ---------------------
-def upload_images_v1(image_paths: list[str]) -> list[str]:
+def upload_images_v1(image_buffers: list[io.BytesIO]) -> list[str]:
+    media_ids = []
+
+    for buf in image_buffers:
+        try:
+            media = api_v1.media_upload(filename=buf.name, file=buf)
+            media_ids.append(media.media_id_string)
+            logger.info(f"✅ アップロード成功: {buf.name}")
+        except Exception as e:
+            logger.error(f"❌ アップロード失敗: {buf.name} → {e}")
+
+    return media_ids
+
+
+
+# ---------------------
+# メディアアップロード（v1.1）ローカルダウンロード版
+# ---------------------
+def upload_images_v1_on_local(image_paths: list[str]) -> list[str]:
     media_ids = []
     for path in image_paths:
         abs_path = os.path.abspath(path)
@@ -58,7 +77,7 @@ def post_tweet_v2(text: str, media_ids: list[str] = [], reply_to: str = None) ->
 # ---------------------
 # フルスレッド投稿
 # ---------------------
-def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str):
+def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str, point: str = "", summary: str = ""):
     logger.info("🚀 スレッド投稿開始")
     image_paths = download_images(image_urls)
     first_images = image_paths[:4]
@@ -73,7 +92,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str):
         tweet_id = post_tweet_v2("", media_ids, reply_to=tweet_id)
         time.sleep(10)
 
-    post_tweet_v2(f"続きを読む👇 {affiliate_url}", reply_to=tweet_id)
+    post_tweet_v2(f"続きを読む👇 {affiliate_url} {point}", reply_to=tweet_id)
     logger.info("🏁 スレッド投稿完了")
 
 # ---------------------
