@@ -7,17 +7,17 @@ def main():
         print("投稿対象がありません。")
         return
 
-    post_id = post['id']
-    comment = post['comment']
-    image_urls = post['image_urls']
+    item_id = post['id']
+    image_urls = post['sample_images']
     affiliate_url = post['affiliate_url']
+    comment = post['auto_comment']  # カラム名が comment ならそのままでOK
+    summary = post['auto_summary']  # カラム名が comment ならそのままでOK
+    point = post['auto_point']  # カラム名が comment ならそのままでOK
 
     post_full_thread(comment, image_urls, affiliate_url)
 
-    mark_post_as_posted(post_id)
-    print(f"投稿完了：{post_id}")
+    mark_post_as_posted(item_id)
+    print(f"✅ 投稿完了：{item_id}")
 
 if __name__ == "__main__":
     main()
-    # test_post_text_only()
-    # test_post_v2_with_image()

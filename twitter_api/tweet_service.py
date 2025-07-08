@@ -45,8 +45,8 @@ def post_tweet_v2(text: str, media_ids: list[str] = [], reply_to: str = None) ->
     try:
         response = client_v2.create_tweet(
             text=text,
-            media_ids={"media_ids": media_ids} if media_ids else None,
-            reply_settings={"in_reply_to_tweet_id": reply_to} if reply_to else None
+            media_ids=media_ids if media_ids else None,
+            in_reply_to_tweet_id=reply_to if reply_to else None
         )
         tweet_id = response.data["id"]
         logger.info(f"✅ 投稿成功 → tweet_id: {tweet_id}")
@@ -73,7 +73,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str):
         tweet_id = post_tweet_v2("", media_ids, reply_to=tweet_id)
         time.sleep(10)
 
-    post_tweet_v2(f"続きを読む👉 {affiliate_url}", reply_to=tweet_id)
+    post_tweet_v2(f"続きを読む👇 {affiliate_url}", reply_to=tweet_id)
     logger.info("🏁 スレッド投稿完了")
 
 # ---------------------
