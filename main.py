@@ -1,5 +1,10 @@
 from db.post_repository import get_next_post, mark_post_as_posted
 from twitter_api.tweet_service import post_full_thread, test_post_text_only, test_post_v2_with_image
+import os
+
+# ログ用ディレクトリを作成（存在しなければ）
+os.makedirs("logs", exist_ok=True)  
+
 
 def main():
     post = get_next_post()
