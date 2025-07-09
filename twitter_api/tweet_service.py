@@ -9,6 +9,9 @@ import requests
 # ---------------------
 # ログ設定
 # ---------------------
+# ログ用ディレクトリを作成（存在しなければ）
+os.makedirs("logs", exist_ok=True)  
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
