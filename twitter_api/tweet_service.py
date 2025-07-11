@@ -82,21 +82,29 @@ def post_tweet_v2(text: str, media_ids: list[str] = [], reply_to: str = None) ->
 # ---------------------
 def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str, point: str = "", summary: str = ""):
     logger.info("🚀 スレッド投稿開始")
-    image_paths = download_images(image_urls)
-    first_images = image_paths[:4]
+
+    # Supabaseなどの画像URLをバイナリで取得（ローカル保存なし）
+    image_buffers = download_images(image_urls)
+
+    # ✅ 1投稿目：1枚だけ投稿
+    first_images = image_buffers[:1]
     media_ids = upload_images_v1(first_images)
     tweet_id = post_tweet_v2(comment, media_ids)
     time.sleep(10)
 
-    remaining = image_paths[4:]
+    # ✅ 2投稿目以降：4枚ずつスレッドで投稿
+    remaining = image_buffers[1:]
     for i in range(0, len(remaining), 4):
         chunk = remaining[i:i+4]
         media_ids = upload_images_v1(chunk)
         tweet_id = post_tweet_v2("", media_ids, reply_to=tweet_id)
         time.sleep(10)
 
+    # ✅ 最終投稿：アフィリエイトリンクと補足
     post_tweet_v2(f"続きを読む👇 {affiliate_url} {point}", reply_to=tweet_id)
+
     logger.info("🏁 スレッド投稿完了")
+
 
 # ---------------------
 # テスト関数
