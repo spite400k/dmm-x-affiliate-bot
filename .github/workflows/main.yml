@@ -3,7 +3,7 @@ name: Post to Twitter (DMM X Bot)
 on:
   schedule:
    
-  #  - cron: '0 15 * * *' # 毎日UTC15時から18時に実行（JSTで0時から3時に実行）に実行
+  - cron: '0 0 1 1 *' # 毎日UTC15時から18時に実行（JSTで0時から3時に実行）に実行
   workflow_dispatch: # 手動実行も可
 
 jobs:
