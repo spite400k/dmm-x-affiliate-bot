@@ -101,7 +101,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str, po
         time.sleep(10)
 
     # ✅ 最終投稿：アフィリエイトリンクと補足
-    post_tweet_v2(f"続きを読む👇 {affiliate_url} {point}", reply_to=tweet_id)
+    post_tweet_v2(f"続きを読む👇 {affiliate_url} ", reply_to=tweet_id)
 
     logger.info("🏁 スレッド投稿完了")
 
