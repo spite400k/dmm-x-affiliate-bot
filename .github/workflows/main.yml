@@ -2,7 +2,8 @@ name: Post to Twitter (DMM X Bot)
 
 on:
   schedule:
-    - cron: '0 15 * * *' # 毎日UTC15時に実行（JSTで0時に実行）
+   
+  - cron: '0 0 1 1 *' # 毎日UTC15時から18時に実行（JSTで0時から3時に実行）に実行
   workflow_dispatch: # 手動実行も可
 
 jobs:
@@ -26,9 +27,10 @@ jobs:
       - name: Create .env file from secrets
         run: |
           echo "API_KEY=${{ secrets.API_KEY }}" >> .env
-          echo "API_SECRET=${{ secrets.API_SECRET }}" >> .env
+          echo "API_SECRET_KEY=${{ secrets.API_SECRET_KEY }}" >> .env
           echo "ACCESS_TOKEN=${{ secrets.ACCESS_TOKEN }}" >> .env
-          echo "ACCESS_SECRET=${{ secrets.ACCESS_SECRET }}" >> .env
+          echo "ACCESS_TOKEN_SECRET=${{ secrets.ACCESS_TOKEN_SECRET }}" >> .env
+          echo "BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}" >> .env
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
           echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
 
