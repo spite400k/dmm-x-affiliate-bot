@@ -77,25 +77,32 @@ def post_tweet_v2(text: str, media_ids: list[str] = [], reply_to: str = None) ->
         logger.exception(f"❌ 投稿失敗 → {e}")
         raise
 
+def fetch_image_buffer_from_url(url: str) -> io.BytesIO:
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    buffer = io.BytesIO(response.content)
+    buffer.name = "cover.jpg"
+    return buffer
+
 # ---------------------
 # フルスレッド投稿
 # ---------------------
-def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str, point: str = "", summary: str = ""):
+def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str, image_large_url: str = "", point: str = "", summary: str = ""):
     logger.info("🚀 スレッド投稿開始")
 
     # Supabaseなどの画像URLをバイナリで取得（ローカル保存なし）
     image_buffers = download_images(image_urls)
 
-    # ✅ 1投稿目：1枚だけ投稿
-    first_images = image_buffers[:1]
-    media_ids = upload_images_v1(first_images)
+    # 1枚目投稿 → image_large_urlをメモリ上で取得して投稿
+    cover_buffer = fetch_image_buffer_from_url(image_large_url)
+    media_ids = upload_images_v1([cover_buffer])
     tweet_id = post_tweet_v2(comment, media_ids)
     time.sleep(10)
 
-    # ✅ 2投稿目以降：4枚ずつスレッドで投稿
-    remaining = image_buffers[1:]
-    for i in range(0, len(remaining), 4):
-        chunk = remaining[i:i+4]
+    # 2枚目以降 → image_urls から取得して投稿
+    remaining_paths = download_images(image_urls)
+    for i in range(0, len(remaining_paths), 4):
+        chunk = remaining_paths[i:i+4]
         media_ids = upload_images_v1(chunk)
         tweet_id = post_tweet_v2("", media_ids, reply_to=tweet_id)
         time.sleep(10)

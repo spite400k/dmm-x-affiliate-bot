@@ -2,3 +2,6 @@
 *.pyc
 .env
 /data/
+*.jpg
+*.png
+*.gif
