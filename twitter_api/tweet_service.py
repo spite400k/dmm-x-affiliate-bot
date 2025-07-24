@@ -62,20 +62,29 @@ def upload_images_v1_on_local(image_paths: list[str]) -> list[str]:
 # ---------------------
 # 投稿処理（v2）
 # ---------------------
-def post_tweet_v2(text: str, media_ids: list[str] = [], reply_to: str = None) -> str:
+# 投稿処理（v2）+ リトライ処理あり
+def post_tweet_v2(text: str, media_ids: list[str] = [], reply_to: str = None, max_retries: int = 3, retry_wait: int = 10) -> str:
     logger.info(f"📤 投稿内容: {text[:60]}{'...' if len(text) > 60 else ''}")
-    try:
-        response = client_v2.create_tweet(
-            text=text,
-            media_ids=media_ids if media_ids else None,
-            in_reply_to_tweet_id=reply_to if reply_to else None
-        )
-        tweet_id = response.data["id"]
-        logger.info(f"✅ 投稿成功 → tweet_id: {tweet_id}")
-        return tweet_id
-    except Exception as e:
-        logger.exception(f"❌ 投稿失敗 → {e}")
-        raise
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client_v2.create_tweet(
+                text=text,
+                media_ids=media_ids if media_ids else None,
+                in_reply_to_tweet_id=reply_to if reply_to else None
+            )
+            tweet_id = response.data["id"]
+            logger.info(f"✅ 投稿成功 → tweet_id: {tweet_id}")
+            return tweet_id
+
+        except Exception as e:
+            logger.warning(f"⚠️ 投稿失敗（{attempt}回目）→ {e}")
+            if attempt < max_retries:
+                logger.info(f"⏳ {retry_wait}秒後にリトライ...")
+                time.sleep(retry_wait)
+            else:
+                logger.error(f"❌ 最大リトライ回数を超えました → 投稿中止")
+                raise
 
 def fetch_image_buffer_from_url(url: str) -> io.BytesIO:
     response = requests.get(url, timeout=10)
