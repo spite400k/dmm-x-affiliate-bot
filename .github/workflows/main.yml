@@ -33,6 +33,14 @@ jobs:
           echo "BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}" >> .env
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
           echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
+          echo "API_KEY_2: ${{ secrets.API_KEY_2 }}" >> .env
+          echo "API_SECRET_KEY_2: ${{ secrets.API_SECRET_KEY_2 }}" >> .env
+          echo "ACCESS_TOKEN_2: ${{ secrets.ACCESS_TOKEN_2 }}" >> .env
+          echo "ACCESS_TOKEN_SECRET_2: ${{ secrets.ACCESS_TOKEN_SECRET_2 }}" >> .env
+          echo "API_KEY_3: ${{ secrets.API_KEY_3 }}" >> .env
+          echo "API_SECRET_KEY_3: ${{ secrets.API_SECRET_KEY_3 }}" >> .env
+          echo "ACCESS_TOKEN_3: ${{ secrets.ACCESS_TOKEN_3 }}" >> .env
+          echo "ACCESS_TOKEN_SECRET_3: ${{ secrets.ACCESS_TOKEN_SECRET_3 }}" >> .env
 
       - name: Run tweet bot
         run: python main.py
