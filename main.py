@@ -7,7 +7,15 @@ os.makedirs("logs", exist_ok=True)
 
 
 def main():
-    post = get_next_post()
+    targets = [
+        {"service": "doujin", "floor": "digital_doujin"}, # 同人誌
+        # {"service": "digital", "floor": "videoc"}, # 動画 素人
+        # {"service": "digital", "floor": "nikkatsu"}, # 写真
+        # {"service": "digital", "floor": "videoa"}, # ビデオ
+        # {"service": "digital", "floor": "anime"}, # アニメ
+    ]
+
+    post = get_next_post(targets[0]['service'], targets[0]['floor'])
     if not post:
         print("投稿対象がありません。")
         return
