@@ -1,11 +1,12 @@
 import tweepy
 import os
 from dotenv import load_dotenv
+# 環境変数から認証情報を取得
+load_dotenv()
 
 def get_clients(account: str):
     """アカウント名に応じて v1.1 / v2 のクライアントを返す"""
-    # 環境変数から認証情報を取得
-    load_dotenv()
+
     api_key = os.getenv(f"API_KEY_{account}")
     api_secret = os.getenv(f"API_SECRET_KEY_{account}")
     access_token = os.getenv(f"ACCESS_TOKEN_{account}")
