@@ -1,4 +1,3 @@
-from twitter_api.twitter_client import api_v1, client_v2
 from utils.image import download_images
 import time
 import os
@@ -6,6 +5,8 @@ import time
 import logging
 import io
 import requests
+from twitter_api.twitter_client import get_clients
+
 # ---------------------
 # ログ設定
 # ---------------------
@@ -26,9 +27,8 @@ logger = logging.getLogger(__name__)
 # ---------------------
 # メディアアップロード（v1.1）
 # ---------------------
-def upload_images_v1(image_buffers: list[io.BytesIO]) -> list[str]:
+def upload_images_v1(api_v1, image_buffers: list[io.BytesIO]) -> list[str]:
     media_ids = []
-
     for buf in image_buffers:
         try:
             media = api_v1.media_upload(filename=buf.name, file=buf)
@@ -36,7 +36,6 @@ def upload_images_v1(image_buffers: list[io.BytesIO]) -> list[str]:
             logger.info(f"✅ アップロード成功: {buf.name}")
         except Exception as e:
             logger.error(f"❌ アップロード失敗: {buf.name} → {e}")
-
     return media_ids
 
 
@@ -63,7 +62,7 @@ def upload_images_v1_on_local(image_paths: list[str]) -> list[str]:
 # 投稿処理（v2）
 # ---------------------
 # 投稿処理（v2）+ リトライ処理あり
-def post_tweet_v2(text: str, media_ids: list[str] = [], reply_to: str = None, max_retries: int = 3, retry_wait: int = 10) -> str:
+def post_tweet_v2(client_v2, text: str, media_ids: list[str] = [], reply_to: str = None, max_retries: int = 3, retry_wait: int = 10) -> str:
     logger.info(f"📤 投稿内容: {text[:60]}{'...' if len(text) > 60 else ''}")
 
     for attempt in range(1, max_retries + 1):
@@ -96,30 +95,32 @@ def fetch_image_buffer_from_url(url: str) -> io.BytesIO:
 # ---------------------
 # フルスレッド投稿
 # ---------------------
-def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str, image_large_url: str = "", point: str = "", summary: str = ""):
-    logger.info("🚀 スレッド投稿開始")
+def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
+                     image_large_url: str = "", point: str = "", summary: str = "",
+                     account: str = "1"):
+    logger.info(f"🚀 スレッド投稿開始: アカウント{account}")
 
-    # Supabaseなどの画像URLをバイナリで取得（ローカル保存なし）
-    image_buffers = download_images(image_urls)
+    # アカウント別のクライアントを取得
+    api_v1, client_v2 = get_clients(account)
 
-    # 1枚目投稿 → image_large_urlをメモリ上で取得して投稿
+    # 1枚目
     cover_buffer = fetch_image_buffer_from_url(image_large_url)
-    media_ids = upload_images_v1([cover_buffer])
-    tweet_id = post_tweet_v2(comment, media_ids)
+    media_ids = upload_images_v1(api_v1, [cover_buffer])
+    tweet_id = post_tweet_v2(client_v2, comment, media_ids)
     time.sleep(10)
 
-    # 2枚目以降 → image_urls から取得して投稿
+    # 2枚目以降
     remaining_paths = download_images(image_urls)
     for i in range(0, len(remaining_paths), 4):
         chunk = remaining_paths[i:i+4]
-        media_ids = upload_images_v1(chunk)
-        tweet_id = post_tweet_v2("", media_ids, reply_to=tweet_id)
+        media_ids = upload_images_v1(api_v1, chunk)
+        tweet_id = post_tweet_v2(client_v2, "", media_ids, reply_to=tweet_id)
         time.sleep(10)
 
-    # ✅ 最終投稿：アフィリエイトリンクと補足
-    post_tweet_v2(f"続きを読む👇 {affiliate_url} ", reply_to=tweet_id)
+    # 最終投稿
+    post_tweet_v2(client_v2, f"続きを読む👇 {affiliate_url}", reply_to=tweet_id)
 
-    logger.info("🏁 スレッド投稿完了")
+    logger.info(f"🏁 スレッド投稿完了: アカウント{account}")
 
 
 # ---------------------
