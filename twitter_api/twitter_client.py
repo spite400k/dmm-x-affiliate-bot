@@ -11,7 +11,7 @@ def get_clients(account: str):
     bearer_token = os.getenv(f"BEARER_TOKEN_{account}")
 
     if not all([api_key, api_secret, access_token, access_secret, bearer_token]):
-        raise ValueError(f"❌ {account} のTwitter認証情報が不足しています")
+        raise ValueError(f"❌ {account} のTwitter認証情報が不足しています,api_key={api_key}, api_secret={api_secret}, access_token={access_token}, access_secret={access_secret}, bearer_token={bearer_token}")
 
     # v1.1 (media_upload 用)
     auth = tweepy.OAuth1UserHandler(api_key, api_secret, access_token, access_secret)
