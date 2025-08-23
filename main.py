@@ -44,12 +44,26 @@ def main():
         comment = post['auto_comment']
         summary = post['auto_summary']
         point = post['auto_point']
+        sample_movie_url = post.get("sample_movie_url")  # ★ 追加
+        campaigns = post.get("campaign", [])
+
+        # キャンペーン情報を本文に追加
+        campaign_text = ""
+        for c in campaigns:
+            title = c.get("title")
+            date_begin = c.get("date_begin")
+            date_end = c.get("date_end")
+            if title and date_begin and date_end:
+                campaign_text += f"\n🎉 {title} ({date_begin[:10]}〜{date_end[:10]})"
+
+        full_comment = comment + campaign_text
 
         # account を渡してどのアカウントで投稿するか指定
         post_full_thread(
-            comment, image_urls, affiliate_url,
+            full_comment, image_urls, affiliate_url,
             image_large_url, point, summary,
-            account=account
+            account=account,
+            sample_movie_url=sample_movie_url  # ★ 追加引数
         )
 
         mark_post_as_posted(item_id)
