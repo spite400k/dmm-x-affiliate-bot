@@ -48,6 +48,9 @@ def main():
         campaigns = post.get("campaign", [])
 
         # キャンペーン情報を本文に追加
+        campaigns = post.get("campaign") or []  # None の場合は空リストにする
+
+        # キャンペーン情報を本文に追加
         campaign_text = ""
         for c in campaigns:
             title = c.get("title")
@@ -56,7 +59,7 @@ def main():
             if title and date_begin and date_end:
                 campaign_text += f"\n🎉 {title} ({date_begin[:10]}〜{date_end[:10]})"
 
-        full_comment = comment + campaign_text
+        full_comment = (comment or "") + campaign_text
 
         # account を渡してどのアカウントで投稿するか指定
         post_full_thread(
