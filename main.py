@@ -66,7 +66,7 @@ def main():
             full_comment, image_urls, affiliate_url,
             image_large_url, point, summary,
             account=account,
-            sample_movie_url=sample_movie_url  # ★ 追加引数
+            # sample_movie_url=sample_movie_url  # ★ 追加引数
         )
 
         mark_post_as_posted(item_id)

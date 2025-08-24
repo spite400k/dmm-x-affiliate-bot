@@ -10,41 +10,29 @@ logging.basicConfig(level=logging.INFO)
 
 import requests
 import io
-from urllib.parse import urlparse
 
-def download_images(urls: list[str], save_dir: str = "temp") -> list[io.BytesIO]:
+def download_images(urls: list[str]) -> list[io.BytesIO]:
     """
-    画像・動画をダウンロードして BytesIO リストで返す
+    Supabaseなどの画像URLから画像バイナリを取得し、BytesIOとして返す。
+    ローカルに保存せずに投稿用バイナリを生成する。
     """
-    os.makedirs(save_dir, exist_ok=True)
-    buffers = []
-
+    image_data_list = []
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
     for url in urls:
         try:
-            response = requests.get(url, timeout=10)
+            print(f"📥 画像取得中: {url}")
+            response = requests.get(url, headers=headers)
             response.raise_for_status()
-
-            # 拡張子取得
-            path = urlparse(url).path
-            ext = os.path.splitext(path)[1].lower()
-            if ext not in [".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mov", ".webm"]:
-                ext = ".jpg"  # デフォルトは jpg
-
-            buf = io.BytesIO(response.content)
-            filename = os.path.basename(path)
-            if not filename:
-                filename = "file" + ext
-            buf.name = filename
-
-            # ローカル保存もしたい場合
-            with open(os.path.join(save_dir, buf.name), "wb") as f:
-                f.write(buf.getbuffer())
-
-            buffers.append(buf)
+            image_data = io.BytesIO(response.content)
+            image_data.name = f"{uuid.uuid4().hex}.jpg" # 仮のファイル名を設定
+            image_data_list.append(image_data)
+            print(f"✅ 取得成功: {url}")
         except Exception as e:
-            print(f"❌ ダウンロード失敗: {url} → {e}")
-    return buffers
+            print(f"❌ 画像取得失敗: {url} → {e}")
 
+    return image_data_list
 
 
 def download_images_on_local(urls: list[str]) -> list[str]:
