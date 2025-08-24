@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def main():
     # アカウントごとにジャンルを設定
     account_targets = [
-        {"account": "3", "service": "doujin", "floor": "digital_doujin"},  # 同人誌
+        # {"account": "3", "service": "doujin", "floor": "digital_doujin"},  # 同人誌
         # {"account": "2", "service": "digital", "floor": "anime"},          # アニメ
         {"account": "2", "service": "digital", "floor": "videoc"},         # 動画（素人）
     ]
@@ -66,7 +66,7 @@ def main():
             full_comment, image_urls, affiliate_url,
             image_large_url, point, summary,
             account=account,
-            # sample_movie_url=sample_movie_url  # ★ 追加引数
+            sample_movie_url=sample_movie_url  # ★ 追加引数
         )
 
         mark_post_as_posted(item_id)
