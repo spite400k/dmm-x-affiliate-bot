@@ -244,17 +244,17 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
     media_ids = []
 
-   # 動画があれば先にアップロード
-    if sample_movie_url:
-        try:
-            # HTMLページURLならMP4を抽出
-            if sample_movie_url.endswith(".html") or "litevideo" in sample_movie_url:
-                mp4_url = get_mp4_url_from_iframe(sample_movie_url)
-                if mp4_url:
-                    sample_movie_url = mp4_url
-        except Exception as e:
-            print(f"[警告] MP4抽出に失敗しました: {e}")
-            # エラーが発生しても sample_movie_url は元のまま後続処理に進む
+#    # 動画があれば先にアップロード
+#     if sample_movie_url:
+#         try:
+#             # HTMLページURLならMP4を抽出
+#             if sample_movie_url.endswith(".html") or "litevideo" in sample_movie_url:
+#                 mp4_url = get_mp4_url_from_iframe(sample_movie_url)
+#                 if mp4_url:
+#                     sample_movie_url = mp4_url
+#         except Exception as e:
+#             print(f"[警告] MP4抽出に失敗しました: {e}")
+#             # エラーが発生しても sample_movie_url は元のまま後続処理に進む
 
 
     # 大きいカバー画像があればアップロード
