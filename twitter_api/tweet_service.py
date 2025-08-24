@@ -5,7 +5,12 @@ import time
 import logging
 import io
 import requests
+import mimetypes
+from datetime import datetime, timezone
 from twitter_api.twitter_client import get_clients
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 
 # ---------------------
 # ログ設定
@@ -22,6 +27,90 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+TEMP_DIR = "temp"
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+# ---------------------
+# キャンペーン整形
+# ---------------------
+def format_campaigns(campaigns: list | None) -> str:
+    if not campaigns:
+        return ""
+    now = datetime.now(timezone.utc)
+    texts = []
+    for c in campaigns:
+        title = c.get("title")
+        date_end = c.get("date_end")
+        try:
+            dt_end = datetime.strptime(date_end, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            days_left = (dt_end - now).days
+            if days_left < 0:
+                status = "終了しました"
+            elif days_left == 0:
+                status = "今日まで！"
+            else:
+                status = f"あと{days_left}日！"
+        except Exception:
+            status = f"{date_end}"
+        texts.append(f"🎉 {title} {status}")
+    return "\n".join(texts)
+
+# ---------------------
+# 投稿本文作成
+# ---------------------
+def build_post_text(comment: str, summary: str, point: str, campaigns: list | None, affiliate_url: str) -> str:
+    parts = []
+    if comment:
+        parts.append(comment)
+    if summary:
+        parts.append(f"概要: {summary}")
+    if point:
+        parts.append(f"注目ポイント: {point}")
+
+    campaign_text = format_campaigns(campaigns)
+    if campaign_text:
+        parts.append(campaign_text)
+
+    # affiliate URL は必ず最後に
+    if affiliate_url:
+        parts.append(affiliate_url)
+
+    return "\n\n".join(parts)
+
+# ---------------------
+# DMM動画ページからMP4取得
+# ---------------------
+def resolve_mp4_url(page_url: str) -> str | None:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    res = requests.get(page_url, headers=headers)
+    res.raise_for_status()
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(res.text, "html.parser")
+    source = soup.find("source")
+    return source["src"] if source and source.get("src") else None
+
+# ---------------------
+# 動画ダウンロード
+# ---------------------
+def download_video(mp4_url: str, filename: str) -> str:
+    filepath = os.path.join(TEMP_DIR, filename)
+    res = requests.get(mp4_url, stream=True)
+    res.raise_for_status()
+    with open(filepath, "wb") as f:
+        for chunk in res.iter_content(chunk_size=8192):
+            f.write(chunk)
+    return filepath
+
+# ---------------------
+# ファイル削除
+# ---------------------
+def cleanup_file(filepath: str):
+    try:
+        os.remove(filepath)
+        logger.info(f"🧹 削除完了: {filepath}")
+    except FileNotFoundError:
+        pass
 
 
 # ---------------------
@@ -85,6 +174,9 @@ def post_tweet_v2(client_v2, text: str, media_ids: list[str] = [], reply_to: str
                 logger.error(f"❌ 最大リトライ回数を超えました → 投稿中止")
                 raise
 
+# ---------------------
+# 画像URL → BytesIO
+# ---------------------
 def fetch_image_buffer_from_url(url: str) -> io.BytesIO:
     response = requests.get(url, timeout=10)
     response.raise_for_status()
@@ -92,6 +184,9 @@ def fetch_image_buffer_from_url(url: str) -> io.BytesIO:
     buffer.name = "cover.jpg"
     return buffer
 
+# ---------------------
+# 動画アップロード（v1.1）
+# ---------------------
 def upload_video_v1(api_v1, video_path: str) -> str:
     """動画をアップロードして media_id を返す"""
     abs_path = os.path.abspath(video_path)
@@ -106,39 +201,67 @@ def upload_video_v1(api_v1, video_path: str) -> str:
         logger.exception(f"❌ 動画アップロード失敗: {abs_path} → {e}")
         return ""
 
+def get_mp4_url_from_iframe(iframe_url: str) -> str:
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    
+    driver = webdriver.Chrome(options=options)
+    
+    try:
+        driver.get(iframe_url)
+        time.sleep(5)  # JS のレンダリング待ち
+
+        # iframe に切り替え
+        iframe = driver.find_element(By.TAG_NAME, "iframe")
+        driver.switch_to.frame(iframe)
+        time.sleep(2)  # iframe 内の読み込み待ち
+
+        # <video> を取得
+        video_element = driver.find_element(By.TAG_NAME, "video")
+        mp4_url = video_element.get_attribute("src")
+        return mp4_url
+    finally:
+        driver.quit()
+
 # ---------------------
 # フルスレッド投稿
 # ---------------------
 def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                      image_large_url: str = "", 
                      point: str = "", summary: str = "", account: str = "1",
-                     sample_movie_url: str = ""):
+                     sample_movie_url: str = "", campaigns: list | None = None):
 
     logger.info(f"🚀 スレッド投稿開始: アカウント{account}")
     api_v1, client_v2 = get_clients(account)
 
-    # 動画があれば先にアップロード
-    if sample_movie_url:
-        video_buffers = download_images([sample_movie_url])
-        if video_buffers:
-            video_path = os.path.join("temp", video_buffers[0].name)
-            video_media_id = upload_video_v1(api_v1, video_path)
-            if video_media_id:
-                media_ids.append(video_media_id)
+    # 本文作成
+    post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
 
-    # 1枚目画像
     media_ids = []
+
+   # 動画があれば先にアップロード
+    if sample_movie_url:
+        # HTMLページURLならMP4を抽出
+        if sample_movie_url.endswith(".html") or "litevideo" in sample_movie_url:
+            mp4_url = get_mp4_url_from_iframe(sample_movie_url)
+            if mp4_url:
+                sample_movie_url = mp4_url
+
+    # 大きいカバー画像があればアップロード
     if image_large_url:
-        cover_buffer = fetch_image_buffer_from_url(image_large_url)
-        media_ids.extend(upload_images_v1(api_v1, [cover_buffer]))
+        try:
+            cover_buffer = fetch_image_buffer_from_url(image_large_url)
+            media_ids.extend(upload_images_v1(api_v1, [cover_buffer]))
+        except Exception as e:
+            logger.warning(f"⚠ カバー画像アップロード失敗 → {e}")
 
-
-
-    # 1枚目投稿（画像＋動画）
-    tweet_id = post_tweet_v2(client_v2, comment, media_ids)
+    # 1枚目投稿（動画＋カバー画像）
+    tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
     time.sleep(10)
 
-    # 2枚目以降の画像
+    # 残り画像アップロード
     remaining_buffers = download_images(image_urls)
     for i in range(0, len(remaining_buffers), 4):
         chunk = remaining_buffers[i:i+4]
@@ -150,7 +273,6 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
     post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
 
     logger.info(f"🏁 スレッド投稿完了: アカウント{account}")
-
 
 
 # ---------------------
@@ -174,3 +296,4 @@ def test_post_text_only():
         logger.info(f"✅ テキスト投稿成功: https://twitter.com/user/status/{tweet_id}")
     except Exception as e:
         logger.exception(f"❌ テキスト投稿失敗 → {e}")
+
