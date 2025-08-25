@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def main():
     # アカウントごとにジャンルを設定
     account_targets = [
-        # {"account": "3", "service": "doujin", "floor": "digital_doujin"},  # 同人誌
+        {"account": "3", "service": "doujin", "floor": "digital_doujin"},  # 同人誌
         # {"account": "2", "service": "digital", "floor": "anime"},          # アニメ
         {"account": "2", "service": "digital", "floor": "videoc"},         # 動画（素人）
     ]
