@@ -63,8 +63,8 @@ def build_post_text(comment: str, summary: str, point: str, campaigns: list | No
     parts = []
     if comment:
         parts.append(comment)
-    if summary:
-        parts.append(f"概要: {summary}")
+    # if summary:
+    #     parts.append(f"概要: {summary}")
     # if point:
     #     parts.append(f"注目ポイント: {point}")
 
