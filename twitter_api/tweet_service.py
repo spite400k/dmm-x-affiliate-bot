@@ -11,6 +11,8 @@ from twitter_api.twitter_client import get_clients
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # ---------------------
 # ログ設定
@@ -217,7 +219,9 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
         time.sleep(5)  # JS のレンダリング待ち
 
         # iframe に切り替え
-        iframe = driver.find_element(By.TAG_NAME, "iframe")
+        iframe = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+        )
         driver.switch_to.frame(iframe)
         time.sleep(2)  # iframe 内の読み込み待ち
 
@@ -244,7 +248,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
     media_ids = []
 
-   # 動画があれば先にアップロード
+    # 動画があれば先にアップロード
     if sample_movie_url:
         try:
             # HTMLページURLならMP4を抽出
@@ -252,9 +256,16 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                 mp4_url = get_mp4_url_from_iframe(sample_movie_url)
                 if mp4_url:
                     sample_movie_url = mp4_url
+
+            # 動画をダウンロードしてアップロード
+            video_path = download_video(sample_movie_url, "sample.mp4")
+            video_media_id = upload_video_v1(api_v1, video_path)
+            if video_media_id:
+                media_ids.append(video_media_id)
+            cleanup_file(video_path)
+
         except Exception as e:
-            print(f"[警告] MP4抽出に失敗しました: {e}")
-            # エラーが発生しても sample_movie_url は元のまま後続処理に進む
+            logger.warning(f"⚠️ 動画処理失敗 → {e}")
 
 
     # 大きいカバー画像があればアップロード
