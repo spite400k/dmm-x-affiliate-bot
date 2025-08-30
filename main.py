@@ -57,6 +57,7 @@ def main():
                 if title and date_begin and date_end:
                     campaign_text += f"\n🎉 {title} ({date_begin[:10]}〜{date_end[:10]})"
 
+            logger.info(f"タイトル: {post['id']}-{post['title']}")
             full_comment = (comment or "") + campaign_text
 
             # account_id を渡してどのアカウントで投稿するか指定
@@ -69,7 +70,7 @@ def main():
             if not result[0]:
                 logger.error(f"投稿しません: {config['screen_name']} - {result[1]}")
                 continue
-            mark_post_as_posted(item_id)
+            # mark_post_as_posted(item_id)
             logger.info(f"✅ 投稿完了: {config['screen_name']} - {item_id}")
 if __name__ == "__main__":
     main()

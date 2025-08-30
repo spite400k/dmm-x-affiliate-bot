@@ -1,10 +1,29 @@
+import logging
 import tweepy
 import os
 from dotenv import load_dotenv
+
+# ---------------------
+# ログ設定
+# ---------------------
+# ログ用ディレクトリを作成（存在しなければ）
+os.makedirs("logs", exist_ok=True)  
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("tweet.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # 環境変数から認証情報を取得
 load_dotenv()
 
 def get_clients(account: str):
+
     """アカウント名に応じて v1.1 / v2 のクライアントを返す"""
 
     api_key = os.getenv(f"API_KEY_{account}")

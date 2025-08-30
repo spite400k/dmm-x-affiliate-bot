@@ -1,3 +1,4 @@
+from urllib.parse import urlparse
 from utils.image import download_images
 import time
 import os
@@ -30,8 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TEMP_DIR = "temp"
-os.makedirs(TEMP_DIR, exist_ok=True)
+
 
 # ---------------------
 # キャンペーン整形
@@ -95,14 +95,41 @@ def resolve_mp4_url(page_url: str) -> str | None:
 # ---------------------
 # 動画ダウンロード
 # ---------------------
-def download_video(mp4_url: str, filename: str) -> str:
+def download_video(mp4_url: str, sample_movie_url: str) -> str:
+
+
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    TEMP_DIR = os.path.join(BASE_DIR, "temp")
+    os.makedirs(TEMP_DIR, exist_ok=True)
+
+    parsed_url = urlparse(mp4_url)
+    filename = os.path.basename(parsed_url.path)
     filepath = os.path.join(TEMP_DIR, filename)
-    res = requests.get(mp4_url, stream=True)
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+        "Referer": f"{sample_movie_url}"  # ページURLを指定
+    }
+
+    res = requests.get(mp4_url, headers=headers, stream=True, timeout=60)
+    if res.status_code != 200:
+        raise ValueError(f"動画のダウンロードに失敗しました: {mp4_url} (status_code={res.status_code})")
+    
     res.raise_for_status()
+
+    total_bytes = 0
     with open(filepath, "wb") as f:
         for chunk in res.iter_content(chunk_size=8192):
-            f.write(chunk)
+            if chunk:
+                f.write(chunk)
+                total_bytes += len(chunk)
+
+    if total_bytes == 0:
+        raise ValueError(f"ダウンロードしたファイルが空です: {mp4_url}")
+    
+    logger.info(f"✅ 動画ダウンロード成功: {mp4_url} → {filepath} ({total_bytes} bytes)")
     return filepath
+
 
 # ---------------------
 # ファイル削除
@@ -211,7 +238,9 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
     options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
-    
+    options.add_argument("--log-level=3")  # ERROR以上のみ表示
+    options.add_argument("--disable-logging")  # ログ全体抑制（非公式）
+
     driver = webdriver.Chrome(options=options)
     
     try:
@@ -241,6 +270,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                      sample_movie_url: str = "", campaigns: list | None = None):
 
     logger.info(f"🚀 スレッド投稿開始: アカウント{account}")
+
     api_v1, client_v2 = get_clients(account)
 
     # 本文作成
@@ -254,11 +284,9 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
             # HTMLページURLならMP4を抽出
             if sample_movie_url.endswith(".html") or "litevideo" in sample_movie_url:
                 mp4_url = get_mp4_url_from_iframe(sample_movie_url)
-                if mp4_url:
-                    sample_movie_url = mp4_url
 
             # 動画をダウンロードしてアップロード
-            video_path = download_video(sample_movie_url, "sample.mp4")
+            video_path = download_video(mp4_url, sample_movie_url)
             video_media_id = upload_video_v1(api_v1, video_path)
             if video_media_id:
                 media_ids.append(video_media_id)
@@ -292,4 +320,5 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
     post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
 
     logger.info(f"🏁 スレッド投稿完了: アカウント{account}")
+    return True, "投稿成功"
 

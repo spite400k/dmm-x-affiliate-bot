@@ -2,7 +2,10 @@ ACCOUNT_SETTINGS = {
     "1": {
         "enabled": True,
         "screen_name": "yuki23675786",
-        "targets": []  # 投稿ジャンルなし
+        "targets": [
+            # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
+            {"service": "digital", "floor": "videoc"},   # 動画（素人）
+        ],
     },
     "2": {
         "enabled": False,
