@@ -1,4 +1,4 @@
-　name: Post to Twitter (DMM X Bot)
+name: Post to Twitter (DMM X Bot)
 
 on:
   schedule:
