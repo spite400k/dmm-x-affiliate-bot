@@ -113,14 +113,14 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
 
     res = requests.get(mp4_url, headers=headers, stream=True, timeout=60)
 
-    logger.info(f"⚠️ 動画取得ステータス → {res.status_code}")
+    logger.warning(f"⚠️ 動画取得ステータス → {res.status_code}")
 
     if res.status_code != 200:
         raise ValueError(f"動画のダウンロードに失敗しました: {mp4_url} (status_code={res.status_code})")
     
     res.raise_for_status()
 
-    logger.info(f"⚠️ 動画ダウンロード先 → {filepath}")
+    logger.warning(f"⚠️ 動画ダウンロード先 → {filepath}")
     total_bytes = 0
     with open(filepath, "wb") as f:
         for chunk in res.iter_content(chunk_size=8192):
@@ -128,7 +128,7 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
                 f.write(chunk)
                 total_bytes += len(chunk)
 
-    logger.info(f"⚠️ 動画サイズ → {total_bytes}")
+    logger.warning(f"⚠️ 動画サイズ → {total_bytes}")
 
     if total_bytes == 0:
         raise ValueError(f"ダウンロードしたファイルが空です: {mp4_url}")
