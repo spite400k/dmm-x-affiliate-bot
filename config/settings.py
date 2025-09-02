@@ -1,6 +1,6 @@
 ACCOUNT_SETTINGS = {
     "1": {
-        "enabled": True,
+        "enabled": False,
         "screen_name": "yuki23675786",
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
@@ -8,7 +8,7 @@ ACCOUNT_SETTINGS = {
         ],
     },
     "2": {
-        "enabled": False,
+        "enabled": True,
         "screen_name": "Ren47291",
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
@@ -16,14 +16,14 @@ ACCOUNT_SETTINGS = {
         ],
     },
     "3": {
-        "enabled": False,
+        "enabled": True,
         "screen_name": "Sora36100",
         "targets": [
             {"service": "doujin", "floor": "digital_doujin"},  # 同人誌
         ],
     },
     "4": {
-        "enabled": True,
+        "enabled": False,
         "screen_name": "AdultSelectLab",
         "targets": [],  # 投稿ジャンルなし
     },
