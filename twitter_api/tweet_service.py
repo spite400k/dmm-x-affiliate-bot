@@ -112,17 +112,23 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
     }
 
     res = requests.get(mp4_url, headers=headers, stream=True, timeout=60)
+
+    logger.info(f"⚠️ 動画取得ステータス → {res.status_code}")
+
     if res.status_code != 200:
         raise ValueError(f"動画のダウンロードに失敗しました: {mp4_url} (status_code={res.status_code})")
     
     res.raise_for_status()
 
+    logger.info(f"⚠️ 動画ダウンロード先 → {filepath}")
     total_bytes = 0
     with open(filepath, "wb") as f:
         for chunk in res.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
                 total_bytes += len(chunk)
+
+    logger.info(f"⚠️ 動画サイズ → {total_bytes}")
 
     if total_bytes == 0:
         raise ValueError(f"ダウンロードしたファイルが空です: {mp4_url}")
@@ -287,9 +293,9 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
             # 動画をダウンロードしてアップロード
             video_path = download_video(mp4_url, sample_movie_url)
-            video_media_id = upload_video_v1(api_v1, video_path)
-            if video_media_id:
-                media_ids.append(video_media_id)
+            # video_media_id = upload_video_v1(api_v1, video_path)
+            # if video_media_id:
+            #     media_ids.append(video_media_id)
             cleanup_file(video_path)
 
         except Exception as e:
@@ -300,24 +306,24 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
     if image_large_url:
         try:
             cover_buffer = fetch_image_buffer_from_url(image_large_url)
-            media_ids.extend(upload_images_v1(api_v1, [cover_buffer]))
+            # media_ids.extend(upload_images_v1(api_v1, [cover_buffer]))
         except Exception as e:
             logger.warning(f"⚠ カバー画像アップロード失敗 → {e}")
 
     # 1枚目投稿（動画＋カバー画像）
-    tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+    # tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
     time.sleep(10)
 
     # 残り画像アップロード
-    remaining_buffers = download_images(image_urls)
-    for i in range(0, len(remaining_buffers), 4):
-        chunk = remaining_buffers[i:i+4]
-        media_ids = upload_images_v1(api_v1, chunk)
-        tweet_id = post_tweet_v2(client_v2, "", media_ids, reply_to=tweet_id)
-        time.sleep(10)
+    # remaining_buffers = download_images(image_urls)
+    # for i in range(0, len(remaining_buffers), 4):
+    #     chunk = remaining_buffers[i:i+4]
+    #     media_ids = upload_images_v1(api_v1, chunk)
+    #     tweet_id = post_tweet_v2(client_v2, "", media_ids, reply_to=tweet_id)
+        # time.sleep(10)
 
     # 最終投稿
-    post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
+    # post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
 
     logger.info(f"🏁 スレッド投稿完了: アカウント{account}")
     return True, "投稿成功"
