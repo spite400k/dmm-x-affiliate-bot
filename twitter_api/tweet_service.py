@@ -250,6 +250,9 @@ def upload_video_v1(api_v1, video_path: str) -> str:
 # iframe URL から MP4 URL を取得　◎
 # ---------------------
 def get_mp4_url_from_iframe(iframe_url: str) -> str:
+
+    logger.warning(f"⚠️ iframe URL → {iframe_url}")
+
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
@@ -262,7 +265,7 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
     try:
         driver.get(iframe_url)
         time.sleep(5)  # JS のレンダリング待ち
-
+        logger.warning(f"⚠️ ページ読み込み完了")
         # iframe に切り替え
         iframe = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.TAG_NAME, "iframe"))
@@ -270,9 +273,14 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
         driver.switch_to.frame(iframe)
         time.sleep(2)  # iframe 内の読み込み待ち
 
+        logger.warning(f"⚠️ iframe 内に切り替え完了")
         # <video> を取得
         video_element = driver.find_element(By.TAG_NAME, "video")
+
+        logger.warning(f"⚠️ video 要素取得完了")
         mp4_url = video_element.get_attribute("src")
+
+        logger.warning(f"⚠️ 抽出した MP4 URL → {mp4_url}")
         return mp4_url
     finally:
         driver.quit()
@@ -294,13 +302,17 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
     media_ids = []
 
+    logger.warning(f"⚠️ sample_movie_url → {sample_movie_url}")
     # 動画があれば先にアップロード
     if sample_movie_url:
+        logger.warning(f"⚠️ 動画URLあり → {sample_movie_url}")
         try:
             # HTMLページURLならMP4を抽出
             if sample_movie_url.endswith(".html") or "litevideo" in sample_movie_url:
+                logger.warning(f"⚠️ HTMLページURLと判断 → MP4抽出へ")
                 mp4_url = get_mp4_url_from_iframe(sample_movie_url)
 
+            logger.warning(f"⚠️ 抽出したMP4 URL → {mp4_url}")
             # 動画をダウンロードしてアップロード
             video_path = download_video(mp4_url, sample_movie_url)
             # video_media_id = upload_video_v1(api_v1, video_path)
