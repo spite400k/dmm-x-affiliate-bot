@@ -270,6 +270,7 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
         iframe = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.TAG_NAME, "iframe"))
         )
+        logger.warning(f"⚠️ iframe 要素取得完了")
         driver.switch_to.frame(iframe)
         time.sleep(2)  # iframe 内の読み込み待ち
 
