@@ -121,7 +121,7 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
         "Referer": f"{sample_movie_url}"  # ページURLを指定
     }
 
-    res = requests.get(mp4_url, headers=headers, stream=True, timeout=60)
+    res = requests.get(parsed_url, headers=headers, stream=True, timeout=60)
 
     logger.warning(f"⚠️ 動画取得ステータス → {res.status_code}")
 
@@ -265,21 +265,19 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
     try:
         driver.get(iframe_url)
         time.sleep(5)  # JS のレンダリング待ち
-        logger.warning(f"⚠️ ページ読み込み完了")
         # iframe に切り替え
-        iframe = WebDriverWait(driver, 10).until(
+        iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "iframe"))
         )
-        logger.warning(f"⚠️ iframe 要素取得完了")
         driver.switch_to.frame(iframe)
-        time.sleep(2)  # iframe 内の読み込み待ち
 
-        logger.warning(f"⚠️ iframe 内に切り替え完了")
-        # <video> を取得
-        video_element = driver.find_element(By.TAG_NAME, "video")
+        # video 要素を取得
+        video = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.TAG_NAME, "video"))
+        )
 
-        logger.warning(f"⚠️ video 要素取得完了")
-        mp4_url = video_element.get_attribute("src")
+        mp4_url = video.get_attribute("src")
+        print("🎥 video URL:", mp4_url)
 
         logger.warning(f"⚠️ 抽出した MP4 URL → {mp4_url}")
         return mp4_url
