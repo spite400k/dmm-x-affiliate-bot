@@ -296,7 +296,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
     logger.info(f"🚀 スレッド投稿開始: アカウント{account}")
 
     api_v1, client_v2 = get_clients(account)
-
+    logger.info(f"✅ Twitter APIクライアント取得成功")
     # 本文作成
     post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
 

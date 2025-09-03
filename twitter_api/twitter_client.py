@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 def get_clients(account: str):
-
+    logger.info(f"🔑 Twitter APIクライアントを取得中: アカウント{account}")
     """アカウント名に応じて v1.1 / v2 のクライアントを返す"""
 
     api_key = os.getenv(f"API_KEY_{account}")
@@ -39,6 +39,7 @@ def get_clients(account: str):
     auth = tweepy.OAuth1UserHandler(api_key, api_secret, access_token, access_secret)
     api_v1 = tweepy.API(auth)
 
+    logger.info(f"✅ Twitter API v1.1 クライアント取得成功: アカウント{account}")
     # v2 (投稿用)
     client_v2 = tweepy.Client(
         bearer_token=bearer_token,
@@ -47,5 +48,5 @@ def get_clients(account: str):
         access_token=access_token,
         access_token_secret=access_secret,
     )
-
+    logger.info(f"✅ Twitter API v2 クライアント取得成功: アカウント{account}")
     return api_v1, client_v2
