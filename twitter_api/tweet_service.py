@@ -97,11 +97,14 @@ def resolve_mp4_url(page_url: str) -> str | None:
 # ---------------------
 def download_video(mp4_url: str, sample_movie_url: str) -> str:
 
-
+    logger.warning(f"開始")
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     TEMP_DIR = os.path.join(BASE_DIR, "temp")
+    logger.warning(f"BASE_DIR {BASE_DIR}")
+    logger.warning(f"TEMP_DIR {TEMP_DIR}")
+    
     os.makedirs(TEMP_DIR, exist_ok=True)
-
+　　
     parsed_url = urlparse(mp4_url)
     filename = os.path.basename(parsed_url.path)
     filepath = os.path.join(TEMP_DIR, filename)
