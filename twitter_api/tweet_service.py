@@ -1,4 +1,6 @@
-from utils import get_sample_movie
+import requests
+from utils.get_sample_movie import get_sample_movie
+from utils.image import download_images
 import time
 import os
 import time
@@ -6,6 +8,7 @@ import logging
 import io
 from datetime import datetime, timezone
 from twitter_api.twitter_client import get_clients
+from utils.get_tachiyomi import capture_all_tachiyomi_pages
 
 
 # ---------------------
@@ -106,7 +109,7 @@ def upload_images_v1_on_local(api_v1, image_paths: list[str]) -> list[str]:
             logger.info(f"✅ アップロード成功: {abs_path}")
         except Exception as e:
             logger.exception(f"❌ アップロード失敗: {abs_path} → {e}")
-    return media_ids
+    # return media_ids
 
 # ---------------------
 # 投稿処理（v2）
@@ -162,48 +165,115 @@ def upload_video_v1(api_v1, video_path: str) -> str:
         logger.exception(f"❌ 動画アップロード失敗: {abs_path} → {e}")
         return ""
 
+
+# ---------------------
+# ファイル削除
+# ---------------------
+def cleanup_file(filepath: str):
+    try:
+        os.remove(filepath)
+        logger.info(f"🧹 削除完了: {filepath}")
+    except FileNotFoundError:
+        pass
+
 # ---------------------
 # フルスレッド投稿
 # ---------------------
 def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                      image_large_url: str = "", 
                      point: str = "", summary: str = "", account: str = "1",
-                     sample_movie_url: str = "", campaigns: list | None = None):
+                     sample_movie_url: str = "", 
+                     tachiyomi_url: str = "", 
+                     campaigns: list | None = None):
 
     logger.info(f"🚀 スレッド投稿開始: アカウント{account}")
 
     api_v1, client_v2 = get_clients(account)
-    logger.info(f"✅ Twitter APIクライアント取得成功")
+    # logger.info(f"✅ Twitter APIクライアント取得成功")
     # 本文作成
     post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
 
     media_ids = []
 
-    logger.warning(f"⚠️ sample_movie_url → {sample_movie_url}")
-    # 動画があれば先にアップロード
-    if sample_movie_url:
-        get_sample_movie(sample_movie_url)
 
-
-    # 大きいカバー画像があればアップロード
-    if image_large_url:
+    if tachiyomi_url:
+        # 立ち読み画像があれば取得＆アップロード
+        # 立ち読みURLが存在する場合のみ処理
+        tachiyomi_image_paths = []
         try:
-            cover_buffer = fetch_image_buffer_from_url(image_large_url)
-            # media_ids.extend(upload_images_v1(api_v1, [cover_buffer]))
+            logging.info("立ち読みデータ取得 URL=%s", tachiyomi_url)
+            # 立ち読みキャプチャ（画像ファイルのリスト）
+            tachiyomi_image_paths = capture_all_tachiyomi_pages(tachiyomi_url)
+
+            media_ids = []
+
+            # 最初の4枚をアップロード
+            first_chunk = tachiyomi_image_paths[:4]
+            if first_chunk:
+                media_ids = upload_images_v1_on_local(api_v1, first_chunk)
+
+            # 1投稿目（最初の4枚）
+            tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+            time.sleep(10)
+
+            # 残りの画像を4枚ずつアップロードしてスレッド化
+            remaining_paths = tachiyomi_image_paths[4:] + download_images(image_urls)
+
+            for i in range(0, len(remaining_paths), 4):
+                chunk = remaining_paths[i:i+4]
+                chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
+
+                tweet_id = post_tweet_v2(client_v2, "", chunk_media_ids, reply_to=tweet_id)
+                time.sleep(10)
+
+            logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
+
         except Exception as e:
-            logger.warning(f"⚠ カバー画像アップロード失敗 → {e}")
+            logger.error(f"⚠ 立ち読みデータ アップロード失敗 → {e}")
+        finally:
+            # 一時ファイルのクリーンアップ
+            for path in tachiyomi_image_paths:
+                cleanup_file(path)
 
-    # 1枚目投稿（動画＋カバー画像）
-    # tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
-    time.sleep(10)
+    elif sample_movie_url:
+        # サンプル動画があればアップロード
+        try:
+            logger.info(f"サンプル動画URL → {sample_movie_url}")
+            video_path = get_sample_movie(api_v1, sample_movie_url)
+            video_media_id = upload_video_v1(api_v1, video_path)
+            if video_media_id:
+                media_ids.append(video_media_id)
+            cleanup_file(video_path)
+            time.sleep(10)  # 動画アップロード後に少し待つ
+            logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
+        except Exception as e:
+            logger.error(f"⚠ サンプル動画アップロード失敗 → {e}")
+        finally:
+            # 一時ファイルのクリーンアップ
+            for path in tachiyomi_image_paths:
+                cleanup_file(path)
+    else:
+        # それ以外の場合、サンプル画像をアップロード
+        # 大きいカバー画像があればアップロード
+        if image_large_url:
+            try:
+                cover_buffer = fetch_image_buffer_from_url(image_large_url)
+                # media_id = upload_images_v1(api_v1, [cover_buffer])
+                media_ids.extend(media_id)
+            except Exception as e:
+                logger.error(f"⚠ カバー画像アップロード失敗 → {e}")
 
-    # 残り画像アップロード
-    # remaining_buffers = download_images(image_urls)
-    # for i in range(0, len(remaining_buffers), 4):
-    #     chunk = remaining_buffers[i:i+4]
-    #     media_ids = upload_images_v1(api_v1, chunk)
-    #     tweet_id = post_tweet_v2(client_v2, "", media_ids, reply_to=tweet_id)
-        # time.sleep(10)
+        # 1枚目投稿（動画＋カバー画像）
+        # tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+        time.sleep(10)
+
+        # 残り画像アップロード
+        remaining_buffers = download_images(image_urls)
+        for i in range(0, len(remaining_buffers), 4):
+            chunk = remaining_buffers[i:i+4]
+            # media_ids = upload_images_v1(api_v1, chunk)
+            # tweet_id = post_tweet_v2(client_v2, "", media_ids, reply_to=tweet_id)
+            # time.sleep(10)
 
     # 最終投稿
     # post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)

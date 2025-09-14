@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------
 def get_mp4_url_from_iframe(iframe_url: str) -> str:
 
-    logger.warning(f"⚠️ iframe URL → {iframe_url}")
+    logger.info(f"⚠️ iframe URL → {iframe_url}")
 
     options = Options()
     options.add_argument("--headless=new")
@@ -107,7 +107,7 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
         "Referer": f"{sample_movie_url}"  # ページURLを指定
     }
 
-    res = requests.get(parsed_url, headers=headers, stream=True, timeout=60)
+    res = requests.get(mp4_url, headers=headers, stream=True, timeout=60)
 
     logger.warning(f"⚠️ 動画取得ステータス → {res.status_code}")
 
@@ -133,34 +133,24 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
     return filepath
 
 
-def get_sample_movie(sample_movie_url):
-    logger.warning(f"⚠️ 動画URLあり → {sample_movie_url}")
+#---------------------
+# サンプル動画取得＆アップロード
+#---------------------
+def get_sample_movie(api_v1,sample_movie_url):
+    logger.info(f"⚠️ 動画URLあり → {sample_movie_url}")
+    video_path = ""
     try:
             # HTMLページURLならMP4を抽出
         if sample_movie_url.endswith(".html") or "litevideo" in sample_movie_url:
-            logger.warning(f"⚠️ HTMLページURLと判断 → MP4抽出へ")
+            logger.info(f"⚠️ HTMLページURLと判断 → MP4抽出へ")
             mp4_url = get_mp4_url_from_iframe(sample_movie_url)
 
-        logger.warning(f"⚠️ 抽出したMP4 URL → {mp4_url}")
+        logger.info(f"⚠️ 抽出したMP4 URL → {mp4_url}")
             # 動画をダウンロードしてアップロード
         video_path = download_video(mp4_url, sample_movie_url)
-            # video_media_id = upload_video_v1(api_v1, video_path)
-            # if video_media_id:
-            #     media_ids.append(video_media_id)
-        cleanup_file(video_path)
+
 
     except Exception as e:
         logger.warning(f"⚠️ 動画処理失敗 → {e}")
 
     return video_path
-
-
-# ---------------------
-# ファイル削除
-# ---------------------
-def cleanup_file(filepath: str):
-    try:
-        os.remove(filepath)
-        logger.info(f"🧹 削除完了: {filepath}")
-    except FileNotFoundError:
-        pass

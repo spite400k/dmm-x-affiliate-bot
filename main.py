@@ -45,8 +45,9 @@ def main():
             comment = post['auto_comment']
             summary = post['auto_summary']
             point = post['auto_point']
-            sample_movie_url = post.get("sample_movie_url")  # ★ 追加
-            campaigns = post.get("campaign") or []
+            sample_movie_url = post["sample_movie_url"]  # ★ 追加
+            campaigns = post["campaign"] or []
+            tachiyomi_url = post["tachiyomi_url"]  # 立ち読みURL
 
             # キャンペーン情報を本文に追加
             campaign_text = ""
@@ -65,7 +66,8 @@ def main():
                 full_comment, image_urls, affiliate_url,
                 image_large_url, point, summary,
                 account=account_id,
-                sample_movie_url=sample_movie_url  # ★ 追加引数
+                sample_movie_url=sample_movie_url,  # ★ 追加引数
+                tachiyomi_url=tachiyomi_url,  # ★ 追加引数
             )
             if not result[0]:
                 logger.error(f"投稿しません: {config['screen_name']} - {result[1]}")

@@ -4,22 +4,24 @@ ACCOUNT_SETTINGS = {
         "screen_name": "yuki23675786",
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
-            {"service": "digital", "floor": "videoc"},   # 動画（素人）
+            # {"service": "digital", "floor": "videoc"},   # 動画（素人）
         ],
     },
     "2": {
-        "enabled": True,
+        "enabled": False,
         "screen_name": "Ren47291",
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
-            {"service": "digital", "floor": "videoc"},   # 動画（素人）
+            # {"service": "digital", "floor": "videoc"},   # 動画（素人）
         ],
     },
     "3": {
         "enabled": True,
         "screen_name": "Sora36100",
         "targets": [
-            {"service": "doujin", "floor": "digital_doujin"},  # 同人誌
+            # {"service": "doujin", "floor": "digital_doujin"},  # 同人誌
+            # {"service": "digital", "floor": "videoc"},   # 動画（素人）
+            {"service": "ebook", "floor": "comic"},    # コミック
         ],
     },
     "4": {
