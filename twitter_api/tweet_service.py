@@ -72,7 +72,7 @@ def build_post_text(comment: str, summary: str, point: str, campaigns: list | No
 
     # affiliate URL は必ず最後に
     # if affiliate_url:
-    #     parts.append(affiliate_url)
+    #     parts.append(affiliate_url) #2025のXだと最初にリンクはないほうがいい
 
     return "\n\n".join(parts)
 
