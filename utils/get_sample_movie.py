@@ -136,7 +136,7 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
 #---------------------
 # サンプル動画取得＆アップロード
 #---------------------
-def get_sample_movie(api_v1,sample_movie_url):
+def get_sample_movie(sample_movie_url):
     logger.info(f"⚠️ 動画URLあり → {sample_movie_url}")
     video_path = ""
     try:

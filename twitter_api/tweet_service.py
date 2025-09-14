@@ -71,8 +71,8 @@ def build_post_text(comment: str, summary: str, point: str, campaigns: list | No
         parts.append(campaign_text)
 
     # affiliate URL は必ず最後に
-    if affiliate_url:
-        parts.append(affiliate_url)
+    # if affiliate_url:
+    #     parts.append(affiliate_url)
 
     return "\n\n".join(parts)
 
@@ -204,29 +204,34 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
             logging.info("立ち読みデータ取得 URL=%s", tachiyomi_url)
             # 立ち読みキャプチャ（画像ファイルのリスト）
             tachiyomi_image_paths = capture_all_tachiyomi_pages(tachiyomi_url)
-
+            # PNGファイルだけ対象
+            tachiyomi_image_paths = [p for p in tachiyomi_image_paths if p.lower().endswith(".png")]
+            if not tachiyomi_image_paths:
+                raise Exception("立ち読み画像が取得できません")
+            
             media_ids = []
 
             # 最初の4枚をアップロード
             first_chunk = tachiyomi_image_paths[:4]
-            if first_chunk:
-                media_ids = upload_images_v1_on_local(api_v1, first_chunk)
+            # if first_chunk:
+                # media_ids = upload_images_v1_on_local(api_v1, first_chunk)
 
             # 1投稿目（最初の4枚）
-            tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+            # tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
             time.sleep(10)
 
             # 残りの画像を4枚ずつアップロードしてスレッド化
-            remaining_paths = tachiyomi_image_paths[4:] + download_images(image_urls)
+            remaining_paths = tachiyomi_image_paths[4:]
 
             for i in range(0, len(remaining_paths), 4):
                 chunk = remaining_paths[i:i+4]
-                chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
+                # chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
 
-                tweet_id = post_tweet_v2(client_v2, "", chunk_media_ids, reply_to=tweet_id)
+                # tweet_id = post_tweet_v2(client_v2, "", chunk_media_ids, reply_to=tweet_id)
                 time.sleep(10)
 
-            logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
+            # logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
+            logger.info(f"✅ 立ち読みデータ アップロード完了: ")
 
         except Exception as e:
             logger.error(f"⚠ 立ち読みデータ アップロード失敗 → {e}")
@@ -239,13 +244,14 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
         # サンプル動画があればアップロード
         try:
             logger.info(f"サンプル動画URL → {sample_movie_url}")
-            video_path = get_sample_movie(api_v1, sample_movie_url)
-            video_media_id = upload_video_v1(api_v1, video_path)
-            if video_media_id:
-                media_ids.append(video_media_id)
+            video_path = get_sample_movie(sample_movie_url)
+            # video_media_id = upload_video_v1(api_v1, video_path)
+            # if video_media_id:
+            #     media_ids.append(video_media_id)
             cleanup_file(video_path)
             time.sleep(10)  # 動画アップロード後に少し待つ
-            logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
+            # logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
+            logger.info(f"✅ サンプル動画アップロード完了: ")
         except Exception as e:
             logger.error(f"⚠ サンプル動画アップロード失敗 → {e}")
         finally:
@@ -259,7 +265,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
             try:
                 cover_buffer = fetch_image_buffer_from_url(image_large_url)
                 # media_id = upload_images_v1(api_v1, [cover_buffer])
-                media_ids.extend(media_id)
+                # media_ids.extend(media_id)
             except Exception as e:
                 logger.error(f"⚠ カバー画像アップロード失敗 → {e}")
 

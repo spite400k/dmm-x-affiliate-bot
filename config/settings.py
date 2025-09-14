@@ -8,15 +8,16 @@ ACCOUNT_SETTINGS = {
         ],
     },
     "2": {
-        "enabled": False,
+        "enabled": True,
         "screen_name": "Ren47291",
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
             # {"service": "digital", "floor": "videoc"},   # 動画（素人）
+            {"service": "ebook", "floor": "comic"},    # コミック
         ],
     },
     "3": {
-        "enabled": True,
+        "enabled": False,
         "screen_name": "Sora36100",
         "targets": [
             # {"service": "doujin", "floor": "digital_doujin"},  # 同人誌
