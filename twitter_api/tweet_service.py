@@ -1,4 +1,5 @@
 import requests
+import tweepy
 from utils.get_sample_movie import get_sample_movie
 from utils.image import download_images
 import time
@@ -109,34 +110,66 @@ def upload_images_v1_on_local(api_v1, image_paths: list[str]) -> list[str]:
             logger.info(f"✅ アップロード成功: {abs_path}")
         except Exception as e:
             logger.exception(f"❌ アップロード失敗: {abs_path} → {e}")
-    # return media_ids
+    return media_ids
 
 # ---------------------
 # 投稿処理（v2）
 # ---------------------
 # 投稿処理（v2）+ リトライ処理あり
-def post_tweet_v2(client_v2, text: str, media_ids: list[str] = [], reply_to: str = None, max_retries: int = 3, retry_wait: int = 10) -> str:
-    logger.info(f"📤 投稿内容: {text[:60]}{'...' if len(text) > 60 else ''}")
+# def post_tweet_v2(client_v2, text: str, media_ids: list[str] = [], reply_to: str = None, max_retries: int = 3, retry_wait: int = 60) -> str:
+#     logger.info(f"📤 投稿内容: {text[:60]}{'...' if len(text) > 60 else ''}")
 
-    for attempt in range(1, max_retries + 1):
+#     for attempt in range(1, max_retries + 1):
+#         try:
+#             response = client_v2.create_tweet(
+#                 text=text,
+#                 media_ids=media_ids if media_ids else None,
+#                 in_reply_to_tweet_id=reply_to if reply_to else None
+#             )
+#             tweet_id = response.data["id"]
+#             logger.info(f"✅ 投稿成功 → tweet_id: {tweet_id}")
+#             return tweet_id
+
+#         except Exception as e:
+#             logger.warning(f"⚠️ 投稿失敗（{attempt}回目）→ {e}")
+#             if attempt < max_retries:
+#                 logger.info(f"⏳ {retry_wait}秒後にリトライ...")
+#                 time.sleep(retry_wait)
+#             else:
+#                 logger.error(f"❌ 最大リトライ回数を超えました → 投稿中止")
+#                 raise
+
+# ---------------------
+# 投稿処理（v2）+ レート制限対応 + リトライ処理あり
+# ---------------------
+def safe_post_tweet(client, text, media_ids=None, reply_to=None, max_retries=5):
+    """
+    Twitterに安全に投稿する。レート制限が来たら待機してリトライ。
+    """
+    for attempt in range(max_retries):
         try:
-            response = client_v2.create_tweet(
+            response = client.create_tweet(
                 text=text,
                 media_ids=media_ids if media_ids else None,
                 in_reply_to_tweet_id=reply_to if reply_to else None
             )
-            tweet_id = response.data["id"]
-            logger.info(f"✅ 投稿成功 → tweet_id: {tweet_id}")
-            return tweet_id
+            logger.info(f"✅ 投稿成功: {response.data}")
+            return response
+
+        except tweepy.errors.TooManyRequests as e:
+            # レート制限 → ヘッダーから再試行時刻を計算
+            reset_time = int(e.response.headers.get("x-rate-limit-reset", time.time() + 60))
+            wait_time = max(reset_time - int(time.time()), 60)  # 最低60秒
+            logger.warning(f"⚠️ レート制限 → {wait_time}秒待機 (attempt {attempt+1}/{max_retries})")
+            time.sleep(wait_time)
 
         except Exception as e:
-            logger.warning(f"⚠️ 投稿失敗（{attempt}回目）→ {e}")
-            if attempt < max_retries:
-                logger.info(f"⏳ {retry_wait}秒後にリトライ...")
-                time.sleep(retry_wait)
-            else:
-                logger.error(f"❌ 最大リトライ回数を超えました → 投稿中止")
-                raise
+            logger.error(f"❌ 投稿失敗 (attempt {attempt+1}/{max_retries}): {e}", exc_info=True)
+            time.sleep(10)
+
+    logger.error("❌ 最大リトライ回数を超えました → 投稿中止")
+    return None
+
 
 # ---------------------
 # 画像URL → BytesIO
@@ -219,7 +252,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                 media_ids = upload_images_v1_on_local(api_v1, first_chunk)
 
             # 1投稿目（最初の4枚）
-            tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+            tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
             time.sleep(10)
 
             # 残りの画像を4枚ずつアップロードしてスレッド化
@@ -229,7 +262,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                 chunk = remaining_paths[i:i+4]
                 chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
 
-                tweet_id = post_tweet_v2(client_v2, "", chunk_media_ids, reply_to=tweet_id)
+                tweet_id = safe_post_tweet(client_v2, "", chunk_media_ids, reply_to=tweet_id)
                 time.sleep(10)
 
             # logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
@@ -252,8 +285,8 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                 media_ids.append(video_media_id)
             time.sleep(10)  # 動画アップロード後に少し待つ
             logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
-            # logger.info(f"✅ サンプル動画アップロード完了: ")
-            tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+            
+            tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
             time.sleep(10)  # ポスト後に少し待つ
         except Exception as e:
             logger.error(f"⚠ サンプル動画アップロード失敗 → {e}")
@@ -266,13 +299,13 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
         if image_large_url:
             try:
                 cover_buffer = fetch_image_buffer_from_url(image_large_url)
-                # media_id = upload_images_v1(api_v1, [cover_buffer])
-                # media_ids.extend(media_id)
+                media_id = upload_images_v1(api_v1, [cover_buffer])
+                media_ids.extend(media_id)
             except Exception as e:
                 logger.error(f"⚠ カバー画像アップロード失敗 → {e}")
 
         # 1枚目投稿（動画＋カバー画像）
-        # tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+        tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         time.sleep(10)
 
         # 残り画像アップロード
@@ -280,11 +313,11 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
         for i in range(0, len(remaining_buffers), 4):
             chunk = remaining_buffers[i:i+4]
             # media_ids = upload_images_v1(api_v1, chunk)
-            # tweet_id = post_tweet_v2(client_v2, "", media_ids, reply_to=tweet_id)
-            # time.sleep(10)
+            # tweet_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
+            time.sleep(10)
 
     # 最終投稿
-    post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
+    safe_post_tweet(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
 
     logger.info(f"🏁 スレッド投稿完了: アカウント{account} {screen_name}")
     return True, "投稿成功"

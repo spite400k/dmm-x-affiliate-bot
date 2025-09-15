@@ -73,7 +73,9 @@ def main():
             if not result[0]:
                 logger.error(f"投稿しません: {config['screen_name']} - {result[1]}")
                 continue
-            # mark_post_as_posted(item_id)
+
+            # 投稿成功したらDBの投稿済みにマーク
+            mark_post_as_posted(item_id)
             logger.info(f"✅ 投稿完了: {config['screen_name']} - {item_id}")
 if __name__ == "__main__":
     main()
