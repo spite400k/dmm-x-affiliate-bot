@@ -21,8 +21,8 @@ ACCOUNT_SETTINGS = {
         "screen_name": "Sora36100",
         "targets": [
             # {"service": "doujin", "floor": "digital_doujin"},  # 同人誌
-            # {"service": "digital", "floor": "videoc"},   # 動画（素人）
-            {"service": "ebook", "floor": "comic"},    # コミック
+            {"service": "digital", "floor": "videoc"},   # 動画（素人）
+            # {"service": "ebook", "floor": "comic"},    # コミック
         ],
     },
     "4": {

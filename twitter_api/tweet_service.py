@@ -184,9 +184,11 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                      point: str = "", summary: str = "", account: str = "1",
                      sample_movie_url: str = "", 
                      tachiyomi_url: str = "", 
-                     campaigns: list | None = None):
+                     campaigns: list | None = None,
+                     screen_name: str = "",
+                     ) -> tuple[bool, str]:
 
-    logger.info(f"🚀 スレッド投稿開始: アカウント{account}")
+    logger.info(f"🚀 スレッド投稿開始: アカウント{account} {screen_name}")
 
     api_v1, client_v2 = get_clients(account)
     # logger.info(f"✅ Twitter APIクライアント取得成功")
@@ -245,19 +247,19 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
         try:
             logger.info(f"サンプル動画URL → {sample_movie_url}")
             video_path = get_sample_movie(sample_movie_url)
-            # video_media_id = upload_video_v1(api_v1, video_path)
-            # if video_media_id:
-            #     media_ids.append(video_media_id)
-            cleanup_file(video_path)
+            video_media_id = upload_video_v1(api_v1, video_path)
+            if video_media_id:
+                media_ids.append(video_media_id)
             time.sleep(10)  # 動画アップロード後に少し待つ
-            # logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
-            logger.info(f"✅ サンプル動画アップロード完了: ")
+            logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
+            # logger.info(f"✅ サンプル動画アップロード完了: ")
+            tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+            time.sleep(10)  # ポスト後に少し待つ
         except Exception as e:
             logger.error(f"⚠ サンプル動画アップロード失敗 → {e}")
         finally:
             # 一時ファイルのクリーンアップ
-            for path in tachiyomi_image_paths:
-                cleanup_file(path)
+            cleanup_file(video_path)
     else:
         # それ以外の場合、サンプル画像をアップロード
         # 大きいカバー画像があればアップロード
@@ -282,9 +284,9 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
             # time.sleep(10)
 
     # 最終投稿
-    # post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
+    post_tweet_v2(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
 
-    logger.info(f"🏁 スレッド投稿完了: アカウント{account}")
+    logger.info(f"🏁 スレッド投稿完了: アカウント{account} {screen_name}")
     return True, "投稿成功"
 
 

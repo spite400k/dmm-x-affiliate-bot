@@ -25,7 +25,7 @@ def main():
     # アカウント設定をループ
     for account_id, config in ACCOUNT_SETTINGS.items():
         if not config["enabled"]:
-            logger.warning(f"⚠️ {config['screen_name']} は実施フラグOFFのためスキップします")
+            logger.info(f"⚠️ {config['screen_name']} は実施フラグOFFのためスキップします")
             continue
 
         # 投稿ジャンルごとにループ
@@ -68,6 +68,7 @@ def main():
                 account=account_id,
                 sample_movie_url=sample_movie_url,  # ★ 追加引数
                 tachiyomi_url=tachiyomi_url,  # ★ 追加引数
+                screen_name=config['screen_name'],
             )
             if not result[0]:
                 logger.error(f"投稿しません: {config['screen_name']} - {result[1]}")

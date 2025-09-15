@@ -10,3 +10,5 @@
 *.mov
 *.png
 *.jpeg
+*.pdf
+__pycache__/
