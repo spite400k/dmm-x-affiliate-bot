@@ -215,11 +215,11 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
             # 最初の4枚をアップロード
             first_chunk = tachiyomi_image_paths[:4]
-            # if first_chunk:
-                # media_ids = upload_images_v1_on_local(api_v1, first_chunk)
+            if first_chunk:
+                media_ids = upload_images_v1_on_local(api_v1, first_chunk)
 
             # 1投稿目（最初の4枚）
-            # tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
+            tweet_id = post_tweet_v2(client_v2, post_text, media_ids)
             time.sleep(10)
 
             # 残りの画像を4枚ずつアップロードしてスレッド化
@@ -227,9 +227,9 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
             for i in range(0, len(remaining_paths), 4):
                 chunk = remaining_paths[i:i+4]
-                # chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
+                chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
 
-                # tweet_id = post_tweet_v2(client_v2, "", chunk_media_ids, reply_to=tweet_id)
+                tweet_id = post_tweet_v2(client_v2, "", chunk_media_ids, reply_to=tweet_id)
                 time.sleep(10)
 
             # logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
