@@ -142,7 +142,7 @@ def upload_images_v1_on_local(api_v1, image_paths: list[str]) -> list[str]:
 # ---------------------
 # 投稿処理（v2）+ レート制限対応 + リトライ処理あり
 # ---------------------
-def safe_post_tweet(client, text, media_ids=None, reply_to=None, max_retries=5):
+def safe_post_tweet(client, text, media_ids=None, reply_to: str =None, max_retries=5):
     """
     Twitterに安全に投稿する。レート制限が来たら待機してリトライ。
     """
@@ -253,6 +253,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
             # 1投稿目（最初の4枚）
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
+            print("DEBUG tweet_id:", tweet_id, type(tweet_id))
             time.sleep(10)
 
             # 残りの画像を4枚ずつアップロードしてスレッド化
@@ -263,6 +264,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                 chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
 
                 tweet_id = safe_post_tweet(client_v2, "", chunk_media_ids, reply_to=tweet_id)
+                print("DEBUG tweet_id:", tweet_id, type(tweet_id))
                 time.sleep(10)
 
             # logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
