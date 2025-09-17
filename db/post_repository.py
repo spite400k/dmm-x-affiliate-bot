@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from db.supabase_client import supabase
 
 def get_next_post(service,floor):
-    res = supabase.table("trn_dmm_items").select("*").eq("is_posted", False).eq("service", service).eq("floor", floor).order("review_count", desc=True).limit(1).execute()
+    res = supabase.table("trn_dmm_items").select("*").eq("is_posted", False).eq("service", service).eq("floor", floor).gt("review_count",0).order("review_count", desc=True).limit(1).execute()
     return res.data[0] if res.data else None
 
 def mark_post_as_posted(post_id: str):
