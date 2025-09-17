@@ -253,7 +253,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
             # 1投稿目（最初の4枚）
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
-            print("DEBUG tweet_id:", tweet_id, type(tweet_id))
+            logger.info("DEBUG tweet_id:", tweet_id, type(tweet_id))
             time.sleep(10)
 
             # 残りの画像を4枚ずつアップロードしてスレッド化
@@ -264,7 +264,7 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
                 chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
 
                 tweet_id = safe_post_tweet(client_v2, "", chunk_media_ids, reply_to=tweet_id)
-                print("DEBUG tweet_id:", tweet_id, type(tweet_id))
+                logger.info("DEBUG tweet_id:", tweet_id, type(tweet_id))
                 time.sleep(10)
 
             # logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
