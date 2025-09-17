@@ -254,7 +254,12 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
             # 1投稿目（最初の4枚）
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
             logger.info("DEBUG tweet_id:", tweet_id, type(tweet_id))
+            
+            if not tweet_id:
+                raise Exception("立ち読みデータの最初の投稿に失敗しました")
+            
             time.sleep(10)
+
 
             # 残りの画像を4枚ずつアップロードしてスレッド化
             remaining_paths = tachiyomi_image_paths[4:]
@@ -265,6 +270,9 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
                 tweet_id = safe_post_tweet(client_v2, "", chunk_media_ids, reply_to=tweet_id)
                 logger.info("DEBUG tweet_id:", tweet_id, type(tweet_id))
+                
+                if not tweet_id:
+                    raise Exception("立ち読みデータのスレッド投稿に失敗しました")
                 time.sleep(10)
 
             # logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
@@ -289,6 +297,8 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
             logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
             
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
+            if not tweet_id:
+                raise Exception("サンプル動画の投稿に失敗しました")
             time.sleep(10)  # ポスト後に少し待つ
         except Exception as e:
             logger.error(f"⚠ サンプル動画アップロード失敗 → {e}")
@@ -308,6 +318,8 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
         # 1枚目投稿（動画＋カバー画像）
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
+        if not tweet_id:
+            return False, "最初の投稿に失敗しました"
         time.sleep(10)
 
         # 残り画像アップロード
@@ -320,6 +332,8 @@ def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
 
     # 最終投稿
     safe_post_tweet(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
+    if not tweet_id:
+        return False, "最後の投稿に失敗しました"
 
     logger.info(f"🏁 スレッド投稿完了: アカウント{account} {screen_name}")
     return True, "投稿成功"
