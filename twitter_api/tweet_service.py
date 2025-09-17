@@ -19,7 +19,7 @@ from utils.get_tachiyomi import capture_all_tachiyomi_pages
 os.makedirs("logs", exist_ok=True)  
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("tweet.log", encoding="utf-8"),
