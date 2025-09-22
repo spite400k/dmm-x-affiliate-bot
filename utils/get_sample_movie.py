@@ -1,4 +1,3 @@
-import tempfile
 from urllib.parse import urlparse
 import time
 import os
@@ -110,14 +109,14 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
 
     res = requests.get(mp4_url, headers=headers, stream=True, timeout=60)
 
-    logger.warning(f"動画取得ステータス → {res.status_code}")
+    logger.warning(f"⚠️ 動画取得ステータス → {res.status_code}")
 
     if res.status_code != 200:
         raise ValueError(f"動画のダウンロードに失敗しました: {mp4_url} (status_code={res.status_code})")
     
     res.raise_for_status()
 
-    logger.warning(f"動画ダウンロード先 → {filepath}")
+    logger.warning(f"⚠️ 動画ダウンロード先 → {filepath}")
     total_bytes = 0
     with open(filepath, "wb") as f:
         for chunk in res.iter_content(chunk_size=8192):
@@ -125,7 +124,7 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
                 f.write(chunk)
                 total_bytes += len(chunk)
 
-    logger.warning(f"動画サイズ → {total_bytes}")
+    logger.warning(f"⚠️ 動画サイズ → {total_bytes}")
 
     if total_bytes == 0:
         raise ValueError(f"ダウンロードしたファイルが空です: {mp4_url}")
@@ -137,23 +136,21 @@ def download_video(mp4_url: str, sample_movie_url: str) -> str:
 #---------------------
 # サンプル動画取得＆アップロード
 #---------------------
-def get_sample_movie(url: str) -> str:
-    """サンプル動画をダウンロードして一時ファイルのパスを返す"""
-    # 共通の一時ディレクトリを利用（自動的にOS依存のパスになる）
-    temp_dir = tempfile.gettempdir()
-    
-    # URLからファイル名を決定（最後の部分が空ならデフォルト名）
-    filename = os.path.basename(url.split("?")[0]) or "sample.mp4"
-    abs_path = os.path.join(temp_dir, filename)
-
+def get_sample_movie(sample_movie_url):
+    logger.info(f"動画URLあり → {sample_movie_url}")
+    video_path = ""
     try:
-        response = requests.get(url, stream=True, timeout=30)
-        response.raise_for_status()
+            # HTMLページURLならMP4を抽出
+        if sample_movie_url.endswith(".html") or "litevideo" in sample_movie_url:
+            logger.info(f"HTMLページURLと判断 → MP4抽出へ")
+            mp4_url = get_mp4_url_from_iframe(sample_movie_url)
 
-        with open(abs_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+        logger.info(f"抽出したMP4 URL → {mp4_url}")
+            # 動画をダウンロードしてアップロード
+        video_path = download_video(mp4_url, sample_movie_url)
+        logger.info(f"✅ 動画処理成功 → {video_path}")
 
-        return abs_path
     except Exception as e:
-        raise Exception(f"動画ダウンロード失敗: {url} → {e}")
+        logger.warning(f"⚠️ 動画処理失敗 → {e}")
+
+    return video_path
