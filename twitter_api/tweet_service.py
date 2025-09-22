@@ -271,6 +271,9 @@ def post_full_thread(
         elif sample_movie_url:
             logger.info(f"🎥 サンプル動画URL={sample_movie_url}")
             video_path = get_sample_movie(sample_movie_url)
+            if not os.path.isfile(video_path):
+                raise FileNotFoundError(f"動画ファイルが存在しません: {video_path}")
+
             media_id = upload_video_v1(api_v1, video_path)
             tweet_id = safe_post_tweet(client_v2, post_text, [media_id])
             if not tweet_id:
