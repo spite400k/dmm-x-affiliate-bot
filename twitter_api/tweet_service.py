@@ -151,10 +151,10 @@ def safe_post_tweet(client, text, media_ids=None, reply_to: str =None, max_retri
             response = client.create_tweet(
                 text=text,
                 media_ids=media_ids if media_ids else None,
-                in_reply_to_tweet_id=reply_to if reply_to else None
+                in_reply_to_tweet_id=str(reply_to) if reply_to and str(reply_to).isdigit() else None
             )
             logger.info(f"✅ 投稿成功: {response.data}")
-            return response
+            return response.data["id"]
 
         except tweepy.errors.TooManyRequests as e:
             # レート制限 → ヘッダーから再試行時刻を計算
@@ -212,130 +212,124 @@ def cleanup_file(filepath: str):
 # ---------------------
 # フルスレッド投稿
 # ---------------------
-def post_full_thread(comment: str, image_urls: list[str], affiliate_url: str,
-                     image_large_url: str = "", 
-                     point: str = "", summary: str = "", account: str = "1",
-                     sample_movie_url: str = "", 
-                     tachiyomi_url: str = "", 
-                     campaigns: list | None = None,
-                     screen_name: str = "",
-                     ) -> tuple[bool, str]:
+def post_full_thread(
+    comment: str,
+    image_urls: list[str],
+    affiliate_url: str,
+    image_large_url: str = "",
+    point: str = "",
+    summary: str = "",
+    account: str = "1",
+    sample_movie_url: str = "",
+    tachiyomi_url: str = "",
+    campaigns: list | None = None,
+    screen_name: str = "",
+) -> tuple[bool, str]:
 
     logger.info(f"🚀 スレッド投稿開始: アカウント{account} {screen_name}")
-
     api_v1, client_v2 = get_clients(account)
-    # logger.info(f"✅ Twitter APIクライアント取得成功")
-    # 本文作成
+
     post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
+    tweet_id = None  # 最後のツイートIDを保持
 
-    media_ids = []
-
-
-    if tachiyomi_url:
-        # 立ち読み画像があれば取得＆アップロード
-        # 立ち読みURLが存在する場合のみ処理
-        tachiyomi_image_paths = []
-        try:
-            logging.info("立ち読みデータ取得 URL=%s", tachiyomi_url)
-            # 立ち読みキャプチャ（画像ファイルのリスト）
+    try:
+        # =========================
+        # 立ち読み対応
+        # =========================
+        if tachiyomi_url:
+            logger.info("📖 立ち読みモード開始 URL=%s", tachiyomi_url)
             tachiyomi_image_paths = capture_all_tachiyomi_pages(tachiyomi_url)
-            # PNGファイルだけ対象
             tachiyomi_image_paths = [p for p in tachiyomi_image_paths if p.lower().endswith(".png")]
             if not tachiyomi_image_paths:
-                raise Exception("立ち読み画像が取得できません")
-            
-            media_ids = []
+                raise RuntimeError("❌ 立ち読み画像が取得できません")
 
-            # 最初の4枚をアップロード
+            # 最初の投稿
             first_chunk = tachiyomi_image_paths[:4]
-            if first_chunk:
-                media_ids = upload_images_v1_on_local(api_v1, first_chunk)
-
-            # 1投稿目（最初の4枚）
+            media_ids = upload_images_v1_on_local(api_v1, first_chunk)
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
-            logger.info("DEBUG tweet_id:", tweet_id, type(tweet_id))
-            
             if not tweet_id:
-                raise Exception("立ち読みデータの最初の投稿に失敗しました")
-            
+                raise RuntimeError("❌ 立ち読み最初の投稿に失敗しました")
+            tweet_id = int(tweet_id)  # キャスト
+            logger.info(f"✅ 立ち読み初回投稿成功 tweet_id={tweet_id}")
+
             time.sleep(10)
 
-
-            # 残りの画像を4枚ずつアップロードしてスレッド化
-            remaining_paths = tachiyomi_image_paths[4:]
-
-            for i in range(0, len(remaining_paths), 4):
-                chunk = remaining_paths[i:i+4]
-                chunk_media_ids = upload_images_v1_on_local(api_v1, chunk)
-
-                tweet_id = safe_post_tweet(client_v2, "", chunk_media_ids, reply_to=tweet_id)
-                logger.info("DEBUG tweet_id:", tweet_id, type(tweet_id))
-                
-                if not tweet_id:
-                    raise Exception("立ち読みデータのスレッド投稿に失敗しました")
+            # 残りの投稿
+            for i in range(4, len(tachiyomi_image_paths), 4):
+                chunk = tachiyomi_image_paths[i:i+4]
+                media_ids = upload_images_v1_on_local(api_v1, chunk)
+                reply_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
+                if not reply_id:
+                    raise RuntimeError("❌ 立ち読みスレッド投稿に失敗しました")
+                tweet_id = int(reply_id)
+                logger.info(f"➡ スレッド継続 tweet_id={tweet_id}")
                 time.sleep(10)
 
-            # logger.info(f"✅ 立ち読みデータ アップロード完了: {tweet_id}")
-            logger.info(f"✅ 立ち読みデータ アップロード完了: ")
-
-        except Exception as e:
-            logger.error(f"⚠ 立ち読みデータ アップロード失敗 → {e}")
-        finally:
-            # 一時ファイルのクリーンアップ
-            for path in tachiyomi_image_paths:
-                cleanup_file(path)
-
-    elif sample_movie_url:
-        # サンプル動画があればアップロード
-        try:
-            logger.info(f"サンプル動画URL → {sample_movie_url}")
+        # =========================
+        # サンプル動画対応
+        # =========================
+        elif sample_movie_url:
+            logger.info(f"🎥 サンプル動画URL={sample_movie_url}")
             video_path = get_sample_movie(sample_movie_url)
-            video_media_id = upload_video_v1(api_v1, video_path)
-            if video_media_id:
-                media_ids.append(video_media_id)
-            time.sleep(10)  # 動画アップロード後に少し待つ
-            logger.info(f"✅ サンプル動画アップロード完了: {video_media_id}")
-            
-            tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
+            media_id = upload_video_v1(api_v1, video_path)
+            tweet_id = safe_post_tweet(client_v2, post_text, [media_id])
             if not tweet_id:
-                raise Exception("サンプル動画の投稿に失敗しました")
-            time.sleep(10)  # ポスト後に少し待つ
-        except Exception as e:
-            logger.error(f"⚠ サンプル動画アップロード失敗 → {e}")
-        finally:
-            # 一時ファイルのクリーンアップ
-            cleanup_file(video_path)
-    else:
-        # それ以外の場合、サンプル画像をアップロード
-        # 大きいカバー画像があればアップロード
-        if image_large_url:
-            try:
-                cover_buffer = fetch_image_buffer_from_url(image_large_url)
-                media_id = upload_images_v1(api_v1, [cover_buffer])
-                media_ids.extend(media_id)
-            except Exception as e:
-                logger.error(f"⚠ カバー画像アップロード失敗 → {e}")
-
-        # 1枚目投稿（動画＋カバー画像）
-        tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
-        if not tweet_id:
-            return False, "最初の投稿に失敗しました"
-        time.sleep(10)
-
-        # 残り画像アップロード
-        remaining_buffers = download_images(image_urls)
-        for i in range(0, len(remaining_buffers), 4):
-            chunk = remaining_buffers[i:i+4]
-            # media_ids = upload_images_v1(api_v1, chunk)
-            # tweet_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
+                raise RuntimeError("❌ サンプル動画投稿に失敗しました")
+            tweet_id = int(tweet_id)
+            logger.info(f"✅ サンプル動画投稿成功 tweet_id={tweet_id}")
             time.sleep(10)
 
-    # 最終投稿
-    safe_post_tweet(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
-    if not tweet_id:
-        return False, "最後の投稿に失敗しました"
+        # =========================
+        # 通常画像対応
+        # =========================
+        else:
+            media_ids = []
+            if image_large_url:
+                try:
+                    buf = fetch_image_buffer_from_url(image_large_url)
+                    media_ids = upload_images_v1(api_v1, [buf])
+                except Exception as e:
+                    logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
-    logger.info(f"🏁 スレッド投稿完了: アカウント{account} {screen_name}")
-    return True, "投稿成功"
+            tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
+            if not tweet_id:
+                raise RuntimeError("❌ 最初の画像投稿に失敗しました")
+            tweet_id = int(tweet_id)
+            logger.info(f"✅ 1枚目投稿成功 tweet_id={tweet_id}")
+            time.sleep(10)
+
+            # 残りの画像を4枚ずつ
+            remaining_buffers = download_images(image_urls)
+            for i in range(0, len(remaining_buffers), 4):
+                chunk = remaining_buffers[i:i+4]
+                media_ids = upload_images_v1(api_v1, chunk)
+                reply_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
+                if not reply_id:
+                    raise RuntimeError("❌ 追加画像の投稿に失敗しました")
+                tweet_id = int(reply_id)
+                logger.info(f"➡ 追加画像投稿 tweet_id={tweet_id}")
+                time.sleep(10)
+
+        # =========================
+        # 最終アフィリンク投稿
+        # =========================
+        final_id = safe_post_tweet(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
+        if not final_id:
+            raise RuntimeError("❌ アフィリンク投稿に失敗しました")
+        logger.info(f"🏁 スレッド投稿完了 final_tweet_id={final_id}")
+
+        return True, "投稿成功"
+
+    except Exception as e:
+        logger.error(f"🚨 スレッド投稿全体でエラー発生: {e}")
+        return False, str(e)
+
+    finally:
+        # 一時ファイルのクリーンアップ
+        if tachiyomi_url:
+            for path in locals().get("tachiyomi_image_paths", []):
+                cleanup_file(path)
+        if sample_movie_url:
+            cleanup_file(locals().get("video_path", ""))
 
 
