@@ -28,42 +28,56 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------
-# iframe URL から MP4 URL を取得　◎
+# iframe URL から MP4 URL を取得 ◎
 # ---------------------
 def get_mp4_url_from_iframe(iframe_url: str) -> str:
-
-    logger.info(f"iframe URL → {iframe_url}")
+    logger.info(f"🌐 iframe URL 開始 → {iframe_url}")
 
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
-    options.add_argument("--log-level=3")  # ERROR以上のみ表示
-    options.add_argument("--disable-logging")  # ログ全体抑制（非公式）
+    options.add_argument("--log-level=3")
+    options.add_argument("--disable-logging")
 
     driver = webdriver.Chrome(options=options)
     
     try:
+        logger.debug("🚀 ページ読み込み開始")
         driver.get(iframe_url)
-        time.sleep(5)  # JS のレンダリング待ち
-        # iframe に切り替え
+        time.sleep(3)  # JSレンダリング待ち
+
+        logger.debug("🔎 iframe 探索中...")
         iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "iframe"))
         )
-        driver.switch_to.frame(iframe)
+        logger.info(f"✅ iframe 発見: {iframe.get_attribute('src')}")
 
-        # video 要素を取得
+        driver.switch_to.frame(iframe)
+        logger.debug("🔄 iframe に切り替え完了")
+
+        logger.debug("🎥 video 要素探索中...")
         video = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "video"))
         )
+        logger.info("✅ video タグ発見")
 
         mp4_url = video.get_attribute("src")
-        print("🎥 video URL:", mp4_url)
+        if mp4_url:
+            logger.warning(f"⚠️ 抽出した MP4 URL → {mp4_url}")
+        else:
+            logger.error("❌ video タグはあるが src が空")
 
-        logger.warning(f"⚠️ 抽出した MP4 URL → {mp4_url}")
         return mp4_url
+
+    except Exception as e:
+        logger.exception(f"🔥 例外発生: {type(e).__name__} → {e}")
+        return None
+
     finally:
+        logger.debug("🛑 WebDriver 終了")
         driver.quit()
+
 
 
 # ---------------------
