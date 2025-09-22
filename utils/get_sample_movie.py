@@ -3,12 +3,16 @@ import time
 import os
 import time
 import logging
+from httpcore import TimeoutException
 import requests
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 
 # ---------------------
 # ログ設定
@@ -40,12 +44,26 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
     options.add_argument("--log-level=3")
     options.add_argument("--disable-logging")
 
-    driver = webdriver.Chrome(options=options)
-    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
     try:
         logger.debug("🚀 ページ読み込み開始")
         driver.get(iframe_url)
         time.sleep(3)  # JSレンダリング待ち
+
+        # 年齢認証
+        try:
+            button = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((
+                    By.XPATH,
+                    "//a[text()='はい'] | //a[text()='I Agree']"
+                ))
+            )
+            driver.execute_script("arguments[0].click();", button)
+            logging.info("年齢認証成功")
+            time.sleep(2)
+        except (TimeoutException, StaleElementReferenceException):
+            logging.info("年齢認証不要 or 既認証済み")
 
         logger.debug("🔎 iframe 探索中...")
         iframe = WebDriverWait(driver, 15).until(
