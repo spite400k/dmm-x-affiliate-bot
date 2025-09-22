@@ -61,14 +61,23 @@ def get_mp4_url_from_iframe(iframe_url: str) -> str:
             )
             driver.execute_script("arguments[0].click();", button)
             logging.info("年齢認証成功")
+            with open("debug1.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            driver.save_screenshot("debug1.png")
             time.sleep(2)
         except (TimeoutException, StaleElementReferenceException):
             logging.info("年齢認証不要 or 既認証済み")
+            with open("debug2.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            driver.save_screenshot("debug2.png")
 
         logger.debug("🔎 iframe 探索中...")
         iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "iframe"))
         )
+        with open("debug3.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        driver.save_screenshot("debug3.png")
         logger.info(f"✅ iframe 発見: {iframe.get_attribute('src')}")
 
         driver.switch_to.frame(iframe)

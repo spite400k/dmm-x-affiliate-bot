@@ -49,3 +49,13 @@ jobs:
 
       - name: Run tweet bot
         run: python main.py
+        
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts
+          path: |
+            debug*.html
+            debug*.png
+          if-no-files-found: ignore   # ← ファイルが無いときに失敗しない
