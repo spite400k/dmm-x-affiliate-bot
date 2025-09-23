@@ -39,6 +39,9 @@ def main():
                 continue
 
             item_id = post['id']
+            content_id = post['content_id']
+            floor = post['floor']
+            service = post['service']
             image_urls = post['sample_images']
             affiliate_url = post['affiliate_url']
             image_large_url = post["image_large_url"]
@@ -69,6 +72,8 @@ def main():
                 sample_movie_url=sample_movie_url,  # ★ 追加引数
                 tachiyomi_url=tachiyomi_url,  # ★ 追加引数
                 screen_name=config['screen_name'],
+                content_id=content_id,
+                floor=floor,
             )
             if not result[0]:
                 logger.error(f"投稿しません: {config['screen_name']} - {result[1]}")
