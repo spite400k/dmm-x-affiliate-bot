@@ -220,6 +220,8 @@ def post_full_thread(
             # 最初の投稿
             first_chunk = tachiyomi_image_paths[:4]
             media_ids = upload_images_v1_on_local(api_v1, first_chunk)
+
+            post_text += f"\n\n #FANZA #アダルト"
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
             if not tweet_id:
                 raise RuntimeError("❌ 立ち読み最初の投稿に失敗しました")
@@ -248,6 +250,8 @@ def post_full_thread(
                 raise FileNotFoundError(f"動画ファイルが存在しません: {video_path}")
 
             media_id = upload_video_v1(api_v1, video_path)
+            
+            post_text += f"\n\n #FANZA #アダルト #動画"
             tweet_id = safe_post_tweet(client_v2, post_text, [media_id])
             if not tweet_id:
                 raise RuntimeError("❌ サンプル動画投稿に失敗")
@@ -266,6 +270,7 @@ def post_full_thread(
                 except Exception as e:
                     logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
+            post_text += f"\n\n #FANZA #アダルト"
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
             if not tweet_id:
                 raise RuntimeError("❌ 最初の画像投稿に失敗しました")
