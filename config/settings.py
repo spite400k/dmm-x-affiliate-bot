@@ -13,7 +13,7 @@ ACCOUNT_SETTINGS = {
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
             {"service": "digital", "floor": "videoc"},   # 動画（素人）
-            # {"service": "ebook", "floor": "comic"},    # コミック
+            {"service": "ebook", "floor": "comic"},    # コミック
         ],
     },
     "3": {
