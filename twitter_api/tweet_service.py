@@ -290,13 +290,24 @@ def post_full_thread(
                 logger.info(f"➡ 追加画像投稿 tweet_id={tweet_id}")
                 time.sleep(10)
 
+
         # =========================
         # 最終アフィリンク投稿
         # =========================
-        final_id = safe_post_tweet(client_v2, f"続きを見る👇 {affiliate_url}", reply_to=tweet_id)
+        text=f"続きを見る👇 {affiliate_url}"
+        tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
+        if not tweet_id:
+            raise RuntimeError("❌ アフィリンク投稿に失敗しました")
+        tweet_id = int(tweet_id)
+        logger.info(f"🏁 スレッド投稿完了1 final_tweet_id={tweet_id}")
+        time.sleep(10)
+        
+        portal=f"https://fanzaportal.com/ja"
+        text2=f"今までに紹介した作品👇 {portal}"
+        final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
         if not final_id:
             raise RuntimeError("❌ アフィリンク投稿に失敗しました")
-        logger.info(f"🏁 スレッド投稿完了 final_tweet_id={final_id}")
+        logger.info(f"🏁 スレッド投稿完了2 final_tweet_id={final_id}")
 
         return True, "投稿成功"
 
