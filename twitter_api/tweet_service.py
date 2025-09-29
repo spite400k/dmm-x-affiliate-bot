@@ -302,8 +302,8 @@ def post_full_thread(
         logger.info(f"🏁 スレッド投稿完了1 final_tweet_id={tweet_id}")
         time.sleep(10)
         
-        portal=f"https://fanzaportal.com/ja"
-        text2=f"今までに紹介した作品👇 {portal}"
+        portal=f"https://fanzaportal.com/"
+        text2=f"今までに紹介した作品はここでアーカイブしてます👇\n\n {portal}"
         final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
         if not final_id:
             raise RuntimeError("❌ アフィリンク投稿に失敗しました")
