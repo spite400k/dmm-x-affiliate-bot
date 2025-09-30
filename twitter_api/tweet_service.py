@@ -211,16 +211,17 @@ def post_full_thread(
 
     logger.info(f"🚀 スレッド投稿開始: アカウント{account} {screen_name}")
     api_v1, client_v2 = get_clients(account)
-
-    post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
-    tweet_id = None  # 最後のツイートIDを保持
+    tweet_id = None  # 最後のツイートID
+    error_occurred = False  # 投稿中にエラーが起きたか
 
     try:
-        # =========================
+        post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
+
+        # ------------------------
         # 立ち読み対応
-        # =========================
+        # ------------------------
         if tachiyomi_url:
-            tachiyomi_image_paths = capture_all_tachiyomi_pages_from_supabase(floor,content_id)
+            tachiyomi_image_paths = capture_all_tachiyomi_pages_from_supabase(floor, content_id)
             tachiyomi_image_paths = [p for p in tachiyomi_image_paths if p.lower().endswith(".png")]
             if not tachiyomi_image_paths:
                 raise RuntimeError("❌ 立ち読み画像が取得できません")
@@ -228,47 +229,42 @@ def post_full_thread(
             # 最初の投稿
             first_chunk = tachiyomi_image_paths[:4]
             media_ids = upload_images_v1_on_local(api_v1, first_chunk)
-
-            post_text += f"\n\n #FANZA #アダルト"
+            post_text += "\n\n #FANZA #アダルト"
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
-            if not tweet_id:
-                raise RuntimeError("❌ 立ち読み最初の投稿に失敗しました")
-            tweet_id = int(tweet_id)  # キャスト
-            logger.info(f"✅ 立ち読み初回投稿成功 tweet_id={tweet_id}")
-
-            time.sleep(10)
+            if tweet_id:
+                tweet_id = int(tweet_id)
+            else:
+                raise RuntimeError("❌ 立ち読み初回投稿に失敗")
 
             # 残りの投稿
             for i in range(4, len(tachiyomi_image_paths), 4):
                 chunk = tachiyomi_image_paths[i:i+4]
                 media_ids = upload_images_v1_on_local(api_v1, chunk)
                 reply_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
-                if not reply_id:
+                if reply_id:
+                    tweet_id = int(reply_id)
+                else:
                     raise RuntimeError("❌ 立ち読みスレッド投稿に失敗")
-                tweet_id = int(reply_id)
-                time.sleep(10)
 
-        # =========================
-        # サンプル動画対応 (Supabase)
-        # =========================
+        # ------------------------
+        # サンプル動画対応
+        # ------------------------
         elif sample_movie_url:
-            logger.info(f"🎥 Supabase動画パス={content_id}")
             video_path = get_video_from_supabase(floor, content_id)
             if not os.path.isfile(video_path):
                 raise FileNotFoundError(f"動画ファイルが存在しません: {video_path}")
 
             media_id = upload_video_v1(api_v1, video_path)
-            
-            post_text += f"\n\n #FANZA #アダルト #動画"
+            post_text += "\n\n #FANZA #アダルト #動画"
             tweet_id = safe_post_tweet(client_v2, post_text, [media_id])
-            if not tweet_id:
+            if tweet_id:
+                tweet_id = int(tweet_id)
+            else:
                 raise RuntimeError("❌ サンプル動画投稿に失敗")
-            tweet_id = int(tweet_id)
-            time.sleep(10)
 
-        # =========================
+        # ------------------------
         # 通常画像対応
-        # =========================
+        # ------------------------
         else:
             media_ids = []
             if image_large_url:
@@ -278,13 +274,12 @@ def post_full_thread(
                 except Exception as e:
                     logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
-            post_text += f"\n\n #FANZA #アダルト"
+            post_text += "\n\n #FANZA #アダルト"
             tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
-            if not tweet_id:
-                raise RuntimeError("❌ 最初の画像投稿に失敗しました")
-            tweet_id = int(tweet_id)
-            logger.info(f"✅ 1枚目投稿成功 tweet_id={tweet_id}")
-            time.sleep(10)
+            if tweet_id:
+                tweet_id = int(tweet_id)
+            else:
+                raise RuntimeError("❌ 最初の画像投稿に失敗")
 
             # 残りの画像を4枚ずつ
             remaining_buffers = download_images(image_urls)
@@ -292,81 +287,53 @@ def post_full_thread(
                 chunk = remaining_buffers[i:i+4]
                 media_ids = upload_images_v1(api_v1, chunk)
                 reply_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
-                if not reply_id:
+                if reply_id:
+                    tweet_id = int(reply_id)
+                else:
                     raise RuntimeError("❌ 追加画像投稿に失敗")
-                tweet_id = int(reply_id)
-                logger.info(f"➡ 追加画像投稿 tweet_id={tweet_id}")
-                time.sleep(10)
 
-
-        # # =========================
-        # # 最終アフィリンク投稿
-        # # =========================
-        # text=f"続きを見る👇 {affiliate_url}"
-        # tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
-        # if not tweet_id:
-        #     raise RuntimeError("❌ アフィリンク投稿に失敗しました")
-        # tweet_id = int(tweet_id)
-        # logger.info(f"🏁 スレッド投稿完了1 final_tweet_id={tweet_id}")
-        # time.sleep(10)
-        
-        # portal=f"https://fanzaportal.com/"
-        # if floor=="videoc":
-        #     portal=f"https://fanzaportal.com/videos/{item_id}"
-        # elif floor=="digital_doujin":
-        #     portal=f"https://fanzaportal.com/doujins/{item_id}"
-        # elif floor=="comics":
-        #     portal=f"https://fanzaportal.com/comics/{item_id}"
-
-        
-        # text2=f"今までに紹介した作品はここでアーカイブしてます👇\n\n {portal}"
-        # final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
-        # if not final_id:
-        #     raise RuntimeError("❌ アフィリンク投稿に失敗しました")
-        # logger.info(f"🏁 スレッド投稿完了2 final_tweet_id={final_id}")
-
-        # return True, "投稿成功"
+        return True, "投稿成功"
 
     except Exception as e:
-        logger.error(f"🚨 スレッド投稿全体でエラー発生: {e}")
+        logger.error(f"🚨 投稿中にエラー: {e}")
+        error_occurred = True
         return False, str(e)
 
     finally:
-
-            # どんな場合でもアフィリンクだけは投稿
-            try:
-                # =========================
-                # 最終アフィリンク投稿
-                # =========================
-                text=f"続きを見る👇 {affiliate_url}"
-                tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
-                if not tweet_id:
-                    raise RuntimeError("❌ アフィリンク投稿に失敗しました")
+        # ------------------------
+        # どんな場合でもアフィリンク投稿
+        # ------------------------
+        try:
+            # =========================
+            # 最終アフィリンク投稿
+            # =========================
+            text = f"続きを見る👇 {affiliate_url}"
+            tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
+            if tweet_id:
                 tweet_id = int(tweet_id)
-                logger.info(f"🏁 スレッド投稿完了1 final_tweet_id={tweet_id}")
-                time.sleep(10)
-                
-                portal=f"https://fanzaportal.com/"
-                if floor=="videoc":
-                    portal=f"https://fanzaportal.com/videos/{item_id}"
-                elif floor=="digital_doujin":
-                    portal=f"https://fanzaportal.com/doujins/{item_id}"
-                elif floor=="comics":
-                    portal=f"https://fanzaportal.com/comics/{item_id}"
+            logger.info(f"🏁 アフィリンク投稿完了 tweet_id={tweet_id}")
 
-                
-                text2=f"今までに紹介した作品はここでアーカイブしてます👇\n\n {portal}"
-                final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
-                if not final_id:
-                    raise RuntimeError("❌ アフィリンク投稿に失敗しました")
-                logger.info(f"🏁 スレッド投稿完了2 final_tweet_id={final_id}")
+            # アーカイブ固定ポスト
+            portal = "https://fanzaportal.com/"
+            if floor == "videoc":
+                portal = f"https://fanzaportal.com/videos/{item_id}"
+            elif floor == "digital_doujin":
+                portal = f"https://fanzaportal.com/doujins/{item_id}"
+            elif floor == "comics":
+                portal = f"https://fanzaportal.com/comics/{item_id}"
 
-            except Exception as e:
-                logger.error(f"⚠ アフィリンク投稿すら失敗: {e}")
+            text2 = f"今までに紹介した作品はここでアーカイブしてます👇\n\n{portal}"
+            final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
+            logger.info(f"🏁 アーカイブ固定ポスト完了 final_tweet_id={final_id}")
 
-            # 一時ファイル掃除
-            if tachiyomi_url:
-                for path in locals().get("tachiyomi_image_paths", []):
-                    cleanup_file(path)
-            if sample_movie_url:
-                cleanup_file(locals().get("video_path", ""))
+        except Exception as e:
+            logger.error(f"⚠ アフィリンク投稿すら失敗: {e}")
+
+        # ------------------------
+        # 一時ファイル掃除
+        # ------------------------
+        if tachiyomi_url:
+            for path in locals().get("tachiyomi_image_paths", []):
+                cleanup_file(path)
+        if sample_movie_url:
+            cleanup_file(locals().get("video_path", ""))
