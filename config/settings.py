@@ -30,4 +30,13 @@ ACCOUNT_SETTINGS = {
         "screen_name": "AdultSelectLab",
         "targets": [],  # 投稿ジャンルなし
     },
+    "5": {
+        "enabled": True,
+        "screen_name": "fanza_portal_1",
+        "targets": [
+            # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
+            {"service": "digital", "floor": "videoc"},   # 動画（素人）
+            {"service": "ebook", "floor": "comic"},    # コミック
+        ],  
+    },
 }

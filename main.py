@@ -1,5 +1,5 @@
 import logging
-from time import time
+import time
 from config.settings import ACCOUNT_SETTINGS
 from db.post_repository import get_next_post, mark_post_as_posted
 from twitter_api.tweet_service import post_full_thread
