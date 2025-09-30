@@ -150,10 +150,16 @@ def safe_post_tweet(client, text, media_ids=None, reply_to: str =None, max_retri
 
         except tweepy.errors.TooManyRequests as e:
             # レート制限 → ヘッダーから再試行時刻を計算
-            reset_time = int(e.response.headers.get("x-rate-limit-reset", time.time() + 60))
+            reset_time = int(e.response.headers.get("x-rate-limit-reset", time.time() + 300))
             wait_time = max(reset_time - int(time.time()), 60)  # 最低60秒
             logger.warning(f"⚠️ レート制限 → {wait_time}秒待機 (attempt {attempt+1}/{max_retries})")
             time.sleep(wait_time)
+
+            if wait_time > 600:
+                logger.error("❌ 待機時間が長すぎるため投稿中止")
+                return None
+
+
 
         except Exception as e:
             logger.error(f"❌ 投稿失敗 (attempt {attempt+1}/{max_retries}): {e}", exc_info=True)
@@ -199,6 +205,8 @@ def post_full_thread(
     screen_name: str = "",
     content_id: str = "",
     floor: str = "",
+    item_id: str = "",
+    service: str = ""
 ) -> tuple[bool, str]:
 
     logger.info(f"🚀 スレッド投稿開始: アカウント{account} {screen_name}")
@@ -291,36 +299,74 @@ def post_full_thread(
                 time.sleep(10)
 
 
-        # =========================
-        # 最終アフィリンク投稿
-        # =========================
-        text=f"続きを見る👇 {affiliate_url}"
-        tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
-        if not tweet_id:
-            raise RuntimeError("❌ アフィリンク投稿に失敗しました")
-        tweet_id = int(tweet_id)
-        logger.info(f"🏁 スレッド投稿完了1 final_tweet_id={tweet_id}")
-        time.sleep(10)
+        # # =========================
+        # # 最終アフィリンク投稿
+        # # =========================
+        # text=f"続きを見る👇 {affiliate_url}"
+        # tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
+        # if not tweet_id:
+        #     raise RuntimeError("❌ アフィリンク投稿に失敗しました")
+        # tweet_id = int(tweet_id)
+        # logger.info(f"🏁 スレッド投稿完了1 final_tweet_id={tweet_id}")
+        # time.sleep(10)
         
-        portal=f"https://fanzaportal.com/"
-        text2=f"今までに紹介した作品はここでアーカイブしてます👇\n\n {portal}"
-        final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
-        if not final_id:
-            raise RuntimeError("❌ アフィリンク投稿に失敗しました")
-        logger.info(f"🏁 スレッド投稿完了2 final_tweet_id={final_id}")
+        # portal=f"https://fanzaportal.com/"
+        # if floor=="videoc":
+        #     portal=f"https://fanzaportal.com/videos/{item_id}"
+        # elif floor=="digital_doujin":
+        #     portal=f"https://fanzaportal.com/doujins/{item_id}"
+        # elif floor=="comics":
+        #     portal=f"https://fanzaportal.com/comics/{item_id}"
 
-        return True, "投稿成功"
+        
+        # text2=f"今までに紹介した作品はここでアーカイブしてます👇\n\n {portal}"
+        # final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
+        # if not final_id:
+        #     raise RuntimeError("❌ アフィリンク投稿に失敗しました")
+        # logger.info(f"🏁 スレッド投稿完了2 final_tweet_id={final_id}")
+
+        # return True, "投稿成功"
 
     except Exception as e:
         logger.error(f"🚨 スレッド投稿全体でエラー発生: {e}")
         return False, str(e)
 
     finally:
-        # 一時ファイルのクリーンアップ
-        if tachiyomi_url:
-            for path in locals().get("tachiyomi_image_paths", []):
-                cleanup_file(path)
-        if sample_movie_url:
-            cleanup_file(locals().get("video_path", ""))
 
+            # どんな場合でもアフィリンクだけは投稿
+            try:
+                # =========================
+                # 最終アフィリンク投稿
+                # =========================
+                text=f"続きを見る👇 {affiliate_url}"
+                tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
+                if not tweet_id:
+                    raise RuntimeError("❌ アフィリンク投稿に失敗しました")
+                tweet_id = int(tweet_id)
+                logger.info(f"🏁 スレッド投稿完了1 final_tweet_id={tweet_id}")
+                time.sleep(10)
+                
+                portal=f"https://fanzaportal.com/"
+                if floor=="videoc":
+                    portal=f"https://fanzaportal.com/videos/{item_id}"
+                elif floor=="digital_doujin":
+                    portal=f"https://fanzaportal.com/doujins/{item_id}"
+                elif floor=="comics":
+                    portal=f"https://fanzaportal.com/comics/{item_id}"
 
+                
+                text2=f"今までに紹介した作品はここでアーカイブしてます👇\n\n {portal}"
+                final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
+                if not final_id:
+                    raise RuntimeError("❌ アフィリンク投稿に失敗しました")
+                logger.info(f"🏁 スレッド投稿完了2 final_tweet_id={final_id}")
+
+            except Exception as e:
+                logger.error(f"⚠ アフィリンク投稿すら失敗: {e}")
+
+            # 一時ファイル掃除
+            if tachiyomi_url:
+                for path in locals().get("tachiyomi_image_paths", []):
+                    cleanup_file(path)
+            if sample_movie_url:
+                cleanup_file(locals().get("video_path", ""))

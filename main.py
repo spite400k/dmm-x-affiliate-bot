@@ -1,4 +1,5 @@
 import logging
+from time import time
 from config.settings import ACCOUNT_SETTINGS
 from db.post_repository import get_next_post, mark_post_as_posted
 from twitter_api.tweet_service import post_full_thread
@@ -73,7 +74,7 @@ def main():
                 tachiyomi_url=tachiyomi_url,  # ★ 追加引数
                 screen_name=config['screen_name'],
                 content_id=content_id,
-                floor=floor,
+                floor=floor,item_id=item_id,service=service
             )
             if not result[0]:
                 logger.error(f"投稿しません: {config['screen_name']} - {result[1]}")
@@ -82,5 +83,8 @@ def main():
             # 投稿成功したらDBの投稿済みにマーク
             mark_post_as_posted(item_id)
             logger.info(f"✅ 投稿完了: {config['screen_name']} - {item_id}")
+
+            time.sleep(900)  # 投稿間隔を15分に設定
+            
 if __name__ == "__main__":
     main()
