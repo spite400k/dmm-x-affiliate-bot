@@ -31,7 +31,7 @@ ACCOUNT_SETTINGS = {
         "targets": [],  # 投稿ジャンルなし
     },
     "5": {
-        "enabled": True,
+        "enabled": False,
         "screen_name": "fanza_portal_1",
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる
