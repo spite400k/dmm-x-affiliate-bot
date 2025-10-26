@@ -191,7 +191,7 @@ def cleanup_file(filepath: str):
 # ---------------------
 # フルスレッド投稿 (Supabase動画対応)
 # ---------------------
-def post_full_thread(
+def post_full_twitter(
     comment: str,
     image_urls: list[str],
     affiliate_url: str,
