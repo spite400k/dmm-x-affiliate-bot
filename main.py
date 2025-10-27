@@ -2,7 +2,7 @@ import logging
 import time
 from config.settings import ACCOUNT_SETTINGS
 from db.post_repository import get_next_post, mark_post_as_posted
-from threads_api.threads_service import post_full_thread
+# from threads_api.threads_service import post_full_thread
 from twitter_api.tweet_service import post_full_twitter
 import os
 
@@ -83,25 +83,25 @@ def main():
                 # -----------------------------
                 # Threads投稿
                 # -----------------------------
-                try:
-                    threads_result = post_full_thread(
-                        comment=threads_text,
-                        image_urls=image_urls,
-                        affiliate_url=affiliate_url,
-                        image_large_url=image_large_url,
-                        account=account_id,
-                        campaigns=campaigns,
-                        content_id=content_id,
-                        floor=floor,
-                        item_id=item_id,
-                        service=service,
-                    )
-                    if not threads_result[0]:
-                        logger.warning(f"⚠ Threads投稿失敗: {config['screen_name']} - {threads_result[1]}")
-                    else:
-                        logger.info(f"✅ Threads投稿完了: {config['screen_name']} - {item_id}")
-                except Exception as e:
-                    logger.error(f"🚨 Threads投稿例外: {e}")
+                # try:
+                #     threads_result = post_full_thread(
+                #         comment=threads_text,
+                #         image_urls=image_urls,
+                #         affiliate_url=affiliate_url,
+                #         image_large_url=image_large_url,
+                #         account=account_id,
+                #         campaigns=campaigns,
+                #         content_id=content_id,
+                #         floor=floor,
+                #         item_id=item_id,
+                #         service=service,
+                #     )
+                #     if not threads_result[0]:
+                #         logger.warning(f"⚠ Threads投稿失敗: {config['screen_name']} - {threads_result[1]}")
+                #     else:
+                #         logger.info(f"✅ Threads投稿完了: {config['screen_name']} - {item_id}")
+                # except Exception as e:
+                #     logger.error(f"🚨 Threads投稿例外: {e}")
 
             finally:
                 # -----------------------------
