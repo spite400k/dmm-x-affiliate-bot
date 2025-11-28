@@ -233,7 +233,11 @@ def post_full_twitter(
             except Exception as e:
                 logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
-        post_text += "\n\n #FANZA #動画 #コミック"
+        if site=="dmm" :
+            post_text += "\n\n #DMM #動画 #コミック"
+        else:
+            post_text += "\n\n #FANZA #動画 #コミック"
+
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         if tweet_id:
             tweet_id = int(tweet_id)
