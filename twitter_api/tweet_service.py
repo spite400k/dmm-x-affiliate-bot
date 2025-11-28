@@ -196,6 +196,7 @@ def post_full_twitter(
     image_urls: list[str],
     affiliate_url: str,
     image_large_url: str = "",
+    image_small_url: str = "",
     point: str = "",
     summary: str = "",
     account: str = "1",
@@ -204,6 +205,7 @@ def post_full_twitter(
     campaigns: list | None = None,
     screen_name: str = "",
     content_id: str = "",
+    site:str ="",
     floor: str = "",
     item_id: str = "",
     service: str = ""
@@ -217,80 +219,26 @@ def post_full_twitter(
     try:
         post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
 
-        # ------------------------
-        # 立ち読み対応
-        # ------------------------
-        if tachiyomi_url:
-            tachiyomi_image_paths = capture_all_tachiyomi_pages_from_supabase(floor, content_id)
-            tachiyomi_image_paths = [p for p in tachiyomi_image_paths if p.lower().endswith(".png")]
-            if not tachiyomi_image_paths:
-                raise RuntimeError("❌ 立ち読み画像が取得できません")
+        media_ids = []
+        if image_large_url:
+            try:
+                buf = fetch_image_buffer_from_url(image_large_url)
+                media_ids = upload_images_v1(api_v1, [buf])
+            except Exception as e:
+                logger.error(f"⚠ カバー画像アップロード失敗: {e}")
+        elif image_small_url:
+            try:
+                buf = fetch_image_buffer_from_url(image_small_url)
+                media_ids = upload_images_v1(api_v1, [buf])
+            except Exception as e:
+                logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
-            # 最初の投稿
-            first_chunk = tachiyomi_image_paths[:4]
-            media_ids = upload_images_v1_on_local(api_v1, first_chunk)
-            post_text += "\n\n #FANZA #アダルト"
-            tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
-            if tweet_id:
-                tweet_id = int(tweet_id)
-            else:
-                raise RuntimeError("❌ 立ち読み初回投稿に失敗")
-
-            # 残りの投稿
-            for i in range(4, len(tachiyomi_image_paths), 4):
-                chunk = tachiyomi_image_paths[i:i+4]
-                media_ids = upload_images_v1_on_local(api_v1, chunk)
-                reply_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
-                if reply_id:
-                    tweet_id = int(reply_id)
-                else:
-                    raise RuntimeError("❌ 立ち読みスレッド投稿に失敗")
-
-        # ------------------------
-        # サンプル動画対応
-        # ------------------------
-        elif sample_movie_url:
-            video_path = get_video_from_supabase(floor, content_id)
-            if not os.path.isfile(video_path):
-                raise FileNotFoundError(f"動画ファイルが存在しません: {video_path}")
-
-            media_id = upload_video_v1(api_v1, video_path)
-            post_text += "\n\n #FANZA #アダルト #動画"
-            tweet_id = safe_post_tweet(client_v2, post_text, [media_id])
-            if tweet_id:
-                tweet_id = int(tweet_id)
-            else:
-                raise RuntimeError("❌ サンプル動画投稿に失敗")
-
-        # ------------------------
-        # 通常画像対応
-        # ------------------------
+        post_text += "\n\n #FANZA #動画 #コミック"
+        tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
+        if tweet_id:
+            tweet_id = int(tweet_id)
         else:
-            media_ids = []
-            if image_large_url:
-                try:
-                    buf = fetch_image_buffer_from_url(image_large_url)
-                    media_ids = upload_images_v1(api_v1, [buf])
-                except Exception as e:
-                    logger.error(f"⚠ カバー画像アップロード失敗: {e}")
-
-            post_text += "\n\n #FANZA #アダルト"
-            tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
-            if tweet_id:
-                tweet_id = int(tweet_id)
-            else:
-                raise RuntimeError("❌ 最初の画像投稿に失敗")
-
-            # 残りの画像を4枚ずつ
-            remaining_buffers = download_images(image_urls)
-            for i in range(0, len(remaining_buffers), 4):
-                chunk = remaining_buffers[i:i+4]
-                media_ids = upload_images_v1(api_v1, chunk)
-                reply_id = safe_post_tweet(client_v2, "", media_ids, reply_to=tweet_id)
-                if reply_id:
-                    tweet_id = int(reply_id)
-                else:
-                    raise RuntimeError("❌ 追加画像投稿に失敗")
+            raise RuntimeError("❌ 最初の画像投稿に失敗")
 
         return True, "投稿成功"
 
@@ -307,22 +255,19 @@ def post_full_twitter(
             # =========================
             # 最終アフィリンク投稿
             # =========================
-            text = f"続きを見る👇 {affiliate_url}"
-            tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
-            if tweet_id:
-                tweet_id = int(tweet_id)
-            logger.info(f"🏁 アフィリンク投稿完了 tweet_id={tweet_id}")
+            text = f"続きを見る👉 {affiliate_url}"
+            # tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
+            # if tweet_id:
+            #     tweet_id = int(tweet_id)
+            # logger.info(f"🏁 アフィリンク投稿完了 tweet_id={tweet_id}")
 
             # アーカイブ固定ポスト
-            portal = "https://fanzaportal.com/"
-            if floor == "videoc":
-                portal = f"https://fanzaportal.com/videos/{item_id}"
-            elif floor == "digital_doujin":
-                portal = f"https://fanzaportal.com/doujins/{item_id}"
-            elif floor == "comics":
-                portal = f"https://fanzaportal.com/comics/{item_id}"
+            if site=="dmm" :
+                portal = f"https://dmmportal.jp/{floor}/{item_id}"
+            else :
+                portal = f"https://fanzaportal.com/{floor}/{item_id}"
 
-            text2 = f"今までに紹介した作品はここでアーカイブしてます👇\n\n{portal}"
+            text2 = text + f"\n\n今までに紹介した作品はここでアーカイブしてます👇\n\n{portal}"
             final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
             logger.info(f"🏁 アーカイブ固定ポスト完了 final_tweet_id={final_id}")
 

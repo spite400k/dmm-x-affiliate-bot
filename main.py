@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 from config.settings import ACCOUNT_SETTINGS
 from db.post_repository import get_next_post, mark_post_as_posted
@@ -41,6 +42,7 @@ def main():
             image_urls = post['sample_images']
             affiliate_url = post['affiliate_url']
             image_large_url = post.get("image_large_url", "")
+            image_small_url = post.get("image_small_url", "")
             comment = post.get('auto_comment', "")
             summary = post.get('auto_summary', "")
             point = post.get('auto_point', "")
@@ -63,6 +65,7 @@ def main():
                         image_urls=image_urls,
                         affiliate_url=affiliate_url,
                         image_large_url=image_large_url,
+                        image_small_url=image_small_url,
                         account=account_id,
                         campaigns=campaigns,
                         content_id=content_id,
@@ -151,15 +154,15 @@ def build_twitter_text(comment, summary, point, campaigns, affiliate_url):
     parts = []
     if comment:
         parts.append(comment)
-    if summary:
-        parts.append(f"概要: {summary}")
-    if point:
-        parts.append(f"注目ポイント: {point}")
+    # if summary:
+    #     parts.append(f"概要: {summary}")
+    # if point:
+    #     parts.append(f"注目ポイント: {point}")
     campaign_text = format_campaigns(campaigns)
     if campaign_text:
         parts.append(campaign_text)
-    if affiliate_url:
-        parts.append(affiliate_url)  # Twitterは最後にリンク
+    # if affiliate_url:
+    #     parts.append(affiliate_url)  # Twitterは最後にリンク
     return "\n\n".join(parts)
 
 # ---------------------
@@ -185,12 +188,17 @@ def main():
             logger.info(f"⚠️ {config['screen_name']} は実施フラグOFFのためスキップします")
             continue
 
-        # 投稿ジャンルごとにループ
-        for target in config.get("targets", []):
+        site = config["site"]
+
+        targets = config.get("targets", [])
+
+        if targets:
+            target = random.choice(targets)  # ← ランダムで1件
+            
             service = target["service"]
             floor = target["floor"]
 
-            post = get_next_post(service, floor)
+            post = get_next_post(service, floor, account_id)
             if not post:
                 logger.warning(f"⚠ 投稿対象なし: {config['screen_name']} ({service}/{floor})")
                 continue
@@ -237,7 +245,8 @@ def main():
                         service=service,
                         sample_movie_url=sample_movie_url,
                         tachiyomi_url=tachiyomi_url,
-                        screen_name=config['screen_name']
+                        screen_name=config['screen_name'],
+                        site=site,
                     )
                     if not twitter_result[0]:
                         logger.warning(f"⚠ Twitter投稿失敗: {config['screen_name']} - {twitter_result[1]}")
@@ -274,7 +283,7 @@ def main():
                 # 失敗しても投稿済み扱いにする
                 # -----------------------------
                 try:
-                    mark_post_as_posted(item_id)
+                    mark_post_as_posted(item_id, account_id)
                     logger.info(f"🏁 投稿済みマーク完了（エラー含む）: {config['screen_name']} - {item_id}")
                 except Exception as e:
                     logger.error(f"🚨 投稿済みマーク失敗: {e}")
