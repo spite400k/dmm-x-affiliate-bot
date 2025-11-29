@@ -19,13 +19,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 環境変数から認証情報を取得
-load_dotenv()
+
 
 def get_clients(account: str):
     logger.info(f"🔑 Twitter APIクライアントを取得中: アカウント{account}")
     """アカウント名に応じて v1.1 / v2 のクライアントを返す"""
 
+    # 環境変数から認証情報を取得
+    load_dotenv()
+    
     api_key = os.getenv(f"API_KEY_{account}")
     api_secret = os.getenv(f"API_SECRET_KEY_{account}")
     access_token = os.getenv(f"ACCESS_TOKEN_{account}")
@@ -33,7 +35,13 @@ def get_clients(account: str):
     bearer_token = os.getenv(f"BEARER_TOKEN_{account}")
 
     if not all([api_key, api_secret, access_token, access_secret, bearer_token]):
-        raise ValueError(f"❌ {account} のTwitter認証情報が不足しています,api_key={api_key}, api_secret={api_secret}, access_token={access_token}, access_secret={access_secret}, bearer_token={bearer_token}")
+        raise ValueError(
+            f"❌ {account} のTwitter認証情報が不足しています, \
+            api_key={api_key}, \
+            api_secret={api_secret}, \
+            access_token={access_token}, \
+            access_secret={access_secret}, \
+            bearer_token={bearer_token}")
 
     # v1.1 (media_upload 用)
     auth = tweepy.OAuth1UserHandler(api_key, api_secret, access_token, access_secret)

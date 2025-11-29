@@ -29,7 +29,7 @@ jobs:
         run: |
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
           echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
-          echo "API_KEY_1=${{ secrets.API_KEY_1 }}" >> .env
+          echo "API_KEY_1=${{ secrets.API_KEY }}" >> .env
           echo "API_SECRET_KEY_1=${{ secrets.API_SECRET_KEY }}" >> .env
           echo "ACCESS_TOKEN_1=${{ secrets.ACCESS_TOKEN }}" >> .env
           echo "ACCESS_TOKEN_SECRET_1=${{ secrets.ACCESS_TOKEN_SECRET }}" >> .env
