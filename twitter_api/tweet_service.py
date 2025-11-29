@@ -234,9 +234,9 @@ def post_full_twitter(
                 logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
         if site=="dmm" :
-            post_text += "\n\n #DMM #動画 #コミック"
+            post_text += "\n\n #DMM #マンガ #特集 #おすすめ #無料"
         else:
-            post_text += "\n\n #FANZA #動画 #コミック"
+            post_text += "\n\n #FANZA #動画 #コミック #AV #素人 #成人漫画 #セール #無料"
 
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         if tweet_id:
