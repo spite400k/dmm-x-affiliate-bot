@@ -52,7 +52,7 @@ def main():
 
             logger.info(f"タイトル: {post['id']}-{post['title']}")
 
-            twitter_text = build_twitter_text(comment, summary, point, campaigns, affiliate_url)
+            twitter_text = build_twitter_text(post['title'],comment, summary, point, campaigns, affiliate_url)
             threads_text = build_threads_text(comment, campaigns)
 
             try:
@@ -150,8 +150,9 @@ def format_campaigns(campaigns: list | None) -> str:
 # ---------------------
 # 投稿本文生成（Twitter用）
 # ---------------------
-def build_twitter_text(comment, summary, point, campaigns, affiliate_url):
+def build_twitter_text(title, comment, summary, point, campaigns, affiliate_url):
     parts = []
+    parts.append(title) 
     if comment:
         parts.append(comment)
     # if summary:
@@ -289,7 +290,7 @@ def main():
                     logger.error(f"🚨 投稿済みマーク失敗: {e}")
 
                 # 投稿間隔
-                time.sleep(900)
+                time.sleep(10)
 
 if __name__ == "__main__":
     main()
