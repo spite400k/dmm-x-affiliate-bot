@@ -221,7 +221,7 @@ def main():
             logger.info(f"タイトル: {post['id']}-{post['title']}")
 
             # Twitter本文
-            twitter_text = build_twitter_text(comment, summary, point, campaigns, affiliate_url)
+            twitter_text = build_twitter_text(post['title'],comment, summary, point, campaigns, affiliate_url)
             # Threads本文
             threads_text = build_threads_text(comment, campaigns)
 
