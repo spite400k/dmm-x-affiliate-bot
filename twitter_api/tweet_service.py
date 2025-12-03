@@ -267,9 +267,9 @@ def post_full_twitter(
 
             # アーカイブ固定ポスト
             if site=="dmm" :
-                portal = f"https://dmmportal.jp/{floor}/{item_id}"
+                portal = f"https://dmmportal.jp/{floor}/{content_id}"
             else :
-                portal = f"https://fanzaportal.com/{floor}/{item_id}"
+                portal = f"https://fanzaportal.com/{floor}/{content_id}"
 
             text2 = text + f"\n\n今までに紹介した作品はここでアーカイブしてます👇\n\n{portal}"
             final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
