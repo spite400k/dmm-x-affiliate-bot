@@ -193,6 +193,7 @@ def cleanup_file(filepath: str):
 # ---------------------
 def post_full_twitter(
     comment: str,
+    title: str,
     image_urls: list[str],
     affiliate_url: str,
     image_large_url: str = "",
@@ -234,9 +235,9 @@ def post_full_twitter(
                 logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
         if site=="dmm" :
-            post_text += "\n\n #DMM #マンガ #特集 #おすすめ #無料"
+            post_text += f"\n\n #DMM #マンガ #特集 #おすすめ #無料 #{title}"
         else:
-            post_text += "\n\n #FANZA #動画 #コミック #AV #素人 #成人漫画 #セール #無料"
+            post_text += f"\n\n #FANZA #動画 #コミック #AV #素人 #成人漫画 #セール #無料 #{title}"
 
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         if tweet_id:
@@ -267,7 +268,7 @@ def post_full_twitter(
 
             # アーカイブ固定ポスト
             if site=="dmm" :
-                portal = f"https://dmmportal.jp/{floor}/{content_id}"
+                portal = f"https://dmmportal.jp/{service}/{floor}/{content_id}"
             else :
                 portal = f"https://fanzaportal.com/{floor}/{content_id}"
 

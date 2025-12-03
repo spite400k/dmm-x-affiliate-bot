@@ -138,6 +138,7 @@ def main():
                 try:
                     twitter_result = post_full_twitter(
                         comment=twitter_text,
+                        title=post['title'],
                         image_urls=image_urls,
                         affiliate_url=affiliate_url,
                         image_large_url=image_large_url,
