@@ -267,7 +267,7 @@ def post_full_twitter(
 
             # アーカイブ固定ポスト
             if site=="dmm" :
-                portal = f"https://dmmportal.jp/{floor}/{content_id}"
+                portal = f"https://dmmportal.jp/{service}/{floor}/{content_id}"
             else :
                 portal = f"https://fanzaportal.com/{floor}/{content_id}"
 
