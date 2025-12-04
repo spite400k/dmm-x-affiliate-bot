@@ -114,6 +114,7 @@ def main():
             image_urls = post['sample_images']
             affiliate_url = post['affiliate_url']
             image_large_url = post.get("image_large_url", "")
+            image_small_url = post.get("image_small_url", "")
             comment = post.get('auto_comment', "")
             summary = post.get('auto_summary', "")
             point = post.get('auto_point', "")
@@ -144,6 +145,7 @@ def main():
                         image_urls=image_urls,
                         affiliate_url=affiliate_url,
                         image_large_url=image_large_url,
+                        image_small_url=image_small_url,
                         account=account_id,
                         campaigns=campaigns,
                         content_id=content_id,

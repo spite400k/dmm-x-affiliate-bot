@@ -1,4 +1,5 @@
 # tweet_service.py
+import json
 import os
 import logging
 import io
@@ -189,6 +190,27 @@ def cleanup_file(filepath: str):
         pass
 
 # ---------------------
+# 女優リスト正規化
+# ---------------------
+def normalize(actresses):
+    # JSON文字列 → Pythonオブジェクト
+    if isinstance(actresses, str):
+        try:
+            actresses = json.loads(actresses)
+        except Exception:
+            return []  # パースできなければ空
+    
+    # 辞書でも文字列でも対応
+    names = []
+    for a in actresses:
+        if isinstance(a, dict):
+            names.append(a.get("name"))
+        else:
+            names.append(a)
+    return names
+
+
+# ---------------------
 # フルスレッド投稿 (Supabase動画対応)
 # ---------------------
 def post_full_twitter(
@@ -238,18 +260,29 @@ def post_full_twitter(
 
         if site=="dmm" :
 
-            selected = random.sample(authors, k=min(3, len(authors)))
+            # actresses を正規化
+            authors_names = normalize(authors)
+
+            # ランダム3名
+            selected = random.sample(authors_names, k=min(3, len(authors_names)))
+
             authors_text = " ".join(f"#{name}" for name in selected)
 
             post_text += f"\n\n #DMM #マンガ #無料 #{title} {authors_text}"
         else:
-            # actresses は辞書のリスト
-            selected = random.sample(actresses, k=min(3, len(actresses)))
-            names = [a["name"] for a in selected]
-            actress_text = " ".join(f"#{name}" for name in names)
+
+            # actresses を正規化
+            actress_names = normalize(actresses)
+
+            # ランダム3名
+            selected = random.sample(actress_names, k=min(3, len(actress_names)))
+
+            # #タグ化
+            actress_text = " ".join(f"#{name}" for name in selected)
 
             post_text += f"\n\n #FANZA #動画 #AV #成人マンガ #セール #無料 {actress_text}"
 
+        logger.info(f"🚨 ポスト: {post_text}")
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         if tweet_id:
             tweet_id = int(tweet_id)
