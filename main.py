@@ -120,6 +120,8 @@ def main():
             sample_movie_url = post.get("sample_movie_url")
             campaigns = post.get("campaign") or []
             tachiyomi_url = post.get("tachiyomi_url")
+            authors = post.get("author", [])
+            actresses = post.get("actress", [])
 
             logger.info(f"タイトル: {post['id']}-{post['title']}")
 
@@ -152,6 +154,8 @@ def main():
                         tachiyomi_url=tachiyomi_url,
                         screen_name=config['screen_name'],
                         site=site,
+                        authors=authors,
+                        actresses=actresses,
                     )
                     if not twitter_result[0]:
                         logger.warning(f"⚠ Twitter投稿失敗: {config['screen_name']} - {twitter_result[1]}")

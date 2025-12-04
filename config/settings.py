@@ -7,7 +7,7 @@ ACCOUNT_SETTINGS = {
             {"service": "ebook", "floor": "comic"},   
             {"service": "ebook", "floor": "novel"},   
             {"service": "ebook", "floor": "otherbooks"}, 
-            {"service": "ebook", "floor": "photo"},   
+            # {"service": "ebook", "floor": "photo"},   
         ],	
     },
     "2": {

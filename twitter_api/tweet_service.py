@@ -3,7 +3,7 @@ import os
 import logging
 import io
 import time
-
+import random
 import requests
 import tweepy
 from twitter_api.twitter_client import get_clients
@@ -209,7 +209,9 @@ def post_full_twitter(
     site:str ="",
     floor: str = "",
     item_id: str = "",
-    service: str = ""
+    service: str = "",
+    authors: list | None = None,
+    actresses: list | None = None,
 ) -> tuple[bool, str]:
 
     logger.info(f"🚀 スレッド投稿開始: アカウント{account} {screen_name}")
@@ -235,9 +237,18 @@ def post_full_twitter(
                 logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
         if site=="dmm" :
-            post_text += f"\n\n #DMM #マンガ #特集 #おすすめ #無料 #{title}"
+
+            selected = random.sample(authors, k=min(3, len(authors)))
+            authors_text = " ".join(f"#{name}" for name in selected)
+
+            post_text += f"\n\n #DMM #マンガ #無料 #{title} {authors_text}"
         else:
-            post_text += f"\n\n #FANZA #動画 #コミック #AV #素人 #成人漫画 #セール #無料 #{title}"
+            # actresses は辞書のリスト
+            selected = random.sample(actresses, k=min(3, len(actresses)))
+            names = [a["name"] for a in selected]
+            actress_text = " ".join(f"#{name}" for name in names)
+
+            post_text += f"\n\n #FANZA #動画 #AV #成人マンガ #セール #無料 {actress_text}"
 
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         if tweet_id:
@@ -260,7 +271,7 @@ def post_full_twitter(
             # =========================
             # 最終アフィリンク投稿
             # =========================
-            text = f"続きを見る👉 {affiliate_url}"
+            # text = f"続きを見る👉 {affiliate_url}"
             # tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
             # if tweet_id:
             #     tweet_id = int(tweet_id)
@@ -272,7 +283,7 @@ def post_full_twitter(
             else :
                 portal = f"https://fanzaportal.com/{floor}/{content_id}"
 
-            text2 = text + f"\n\n今までに紹介した作品はここでアーカイブしてます👇\n\n{portal}"
+            text2 = f"\n\n今までに紹介した作品はここから読めるよ👇\n\n{portal}"
             final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
             logger.info(f"🏁 アーカイブ固定ポスト完了 final_tweet_id={final_id}")
 
