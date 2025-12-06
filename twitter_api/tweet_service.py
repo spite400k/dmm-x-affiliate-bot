@@ -193,20 +193,38 @@ def cleanup_file(filepath: str):
 # 女優リスト正規化
 # ---------------------
 def normalize(actresses):
-    # JSON文字列 → Pythonオブジェクト
+    # None → 空リスト
+    if actresses is None:
+        return []
+
+    # JSON文字列 ["杉咲麦"] → Pythonリストへ
     if isinstance(actresses, str):
-        try:
-            actresses = json.loads(actresses)
-        except Exception:
-            return []  # パースできなければ空
-    
-    # 辞書でも文字列でも対応
+        actresses = actresses.strip()
+
+        # JSON形式ならパース
+        if actresses.startswith("[") and actresses.endswith("]"):
+            try:
+                actresses = json.loads(actresses)
+            except Exception:
+                actresses = [actresses]  # パースできなければそのまま単一文字列扱い
+        else:
+            # カンマ区切りなどの場合
+            actresses = [actresses]
+
+    # ここまでで actresses は必ず list のはず
+    if not isinstance(actresses, list):
+        actresses = [actresses]
+
     names = []
     for a in actresses:
         if isinstance(a, dict):
             names.append(a.get("name"))
         else:
-            names.append(a)
+            names.append(str(a))
+
+    # None や "" を取り除きたい場合
+    names = [n for n in names if n and n.strip()]
+
     return names
 
 
@@ -304,7 +322,7 @@ def post_full_twitter(
             # =========================
             # 最終アフィリンク投稿
             # =========================
-            # text = f"続きを見る👉 {affiliate_url}"
+            text = f"続きを見る👉 {affiliate_url}"
             # tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
             # if tweet_id:
             #     tweet_id = int(tweet_id)
@@ -316,7 +334,7 @@ def post_full_twitter(
             else :
                 portal = f"https://fanzaportal.com/{floor}/{content_id}"
 
-            text2 = f"\n\n今までに紹介した作品はここから読めるよ👇\n\n{portal}"
+            text2 = text + f"\n\n今までに紹介した作品はここから読めるよ👇\n\n{portal}"
             final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
             logger.info(f"🏁 アーカイブ固定ポスト完了 final_tweet_id={final_id}")
 
