@@ -11,7 +11,7 @@ ACCOUNT_SETTINGS = {
         ],	
     },
     "2": {
-        "enabled": True,
+        "enabled": False,
         "site":"fanza",
         "screen_name": "Ren47291",
         "targets": [
