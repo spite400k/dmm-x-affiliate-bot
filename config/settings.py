@@ -1,6 +1,6 @@
 ACCOUNT_SETTINGS = {
     "1": {
-        "enabled": False,
+        "enabled": True,
         "site":"dmm",
         "screen_name": "yuki23675786",
         "targets": [
