@@ -64,10 +64,10 @@ def build_post_text(comment: str, summary: str, point: str, campaigns: list | No
     parts = []
     if comment:
         parts.append(comment)
-    # if summary:
-    #     parts.append(f"概要: {summary}")
-    # if point:
-    #     parts.append(f"注目ポイント: {point}")
+    if summary:
+        parts.append(f"概要: {summary}")
+    if point:
+        parts.append(f"注目ポイント: {point}")
 
     campaign_text = format_campaigns(campaigns)
     if campaign_text:
@@ -159,7 +159,16 @@ def safe_post_tweet(client, text, media_ids=None, reply_to: str =None, max_retri
             if wait_time > 600:
                 logger.error("❌ 待機時間が長すぎるため投稿中止")
                 return None
+            
+        except tweepy.errors.TwitterServerError as e:
+            logger.warning("⚠ Xサーバーエラー。指数バックオフで再試行")
+            wait = (2 ** attempt) + random.uniform(0, 3)
+            time.sleep(wait)
 
+        except tweepy.errors.Forbidden as e:
+            logger.critical("❌ 権限エラー。プランまたはトークン確認")
+            return None
+            
 
 
         except Exception as e:
@@ -259,6 +268,12 @@ def post_full_twitter(
     tweet_id = None  # 最後のツイートID
     error_occurred = False  # 投稿中にエラーが起きたか
 
+    # アーカイブ固定ポスト
+    if site=="dmm" :
+        portal = f"https://dmmportal.jp/{service}/{floor}/{content_id}"
+    else :
+        portal = f"https://fanzaportal.com/{floor}/{content_id}"
+
     try:
         post_text = build_post_text(comment, summary, point, campaigns, affiliate_url)
 
@@ -286,7 +301,7 @@ def post_full_twitter(
 
             authors_text = " ".join(f"#{name}" for name in selected)
 
-            post_text += f"\n\n #DMM #マンガ #無料 #{title} {authors_text}"
+            post_text += f"\n\n #DMM #マンガ #無料 #{title} {authors_text}\n\n{portal}"
         else:
 
             # actresses を正規化
@@ -298,7 +313,7 @@ def post_full_twitter(
             # #タグ化
             actress_text = " ".join(f"#{name}" for name in selected)
 
-            post_text += f"\n\n #FANZA #動画 #AV #成人マンガ #セール #無料 {actress_text}"
+            post_text += f"\n\n #FANZA #動画 #AV #成人マンガ #セール #無料 {actress_text}\n\n{portal}"
 
         logger.info(f"🚨 ポスト: {post_text}")
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
@@ -322,19 +337,14 @@ def post_full_twitter(
             # =========================
             # 最終アフィリンク投稿
             # =========================
-            text = f"続きを見る👉 {affiliate_url}"
+            # text = f"続きを見る👉 {affiliate_url}"
             # tweet_id = safe_post_tweet(client_v2, text, reply_to=tweet_id)
             # if tweet_id:
             #     tweet_id = int(tweet_id)
             # logger.info(f"🏁 アフィリンク投稿完了 tweet_id={tweet_id}")
 
-            # アーカイブ固定ポスト
-            if site=="dmm" :
-                portal = f"https://dmmportal.jp/{service}/{floor}/{content_id}"
-            else :
-                portal = f"https://fanzaportal.com/{floor}/{content_id}"
 
-            text2 = text + f"\n\n今までに紹介した作品はここから読めるよ👇\n\n{portal}"
+            text2 = f"\n\n今までに紹介した作品はここから読めるよ【PR】👇\n\n{portal}"
             final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
             logger.info(f"🏁 アーカイブ固定ポスト完了 final_tweet_id={final_id}")
 
