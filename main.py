@@ -3,7 +3,11 @@ import random
 import time
 
 from config.settings import ACCOUNT_SETTINGS
-from db.post_repository import get_next_post, mark_post_as_posted
+from db.post_repository import (
+    get_next_post,
+    mark_post_as_posted,
+    mark_post_failed_skip_queue,
+)
 from twitter_api.tweet_service import format_campaigns, post_full_twitter
 from utils.logger import setup_logger
 
@@ -30,6 +34,25 @@ def build_twitter_text(
     if campaign_text:
         parts.append(campaign_text)
     return "\n\n".join(parts)
+
+
+def _exclude_item_after_post_failure(
+    item_id: str, account_id: str, screen_name: str
+) -> None:
+    """投稿失敗時にキューから外し、次回は別作品が選ばれるようにする。"""
+    try:
+        mark_post_failed_skip_queue(item_id, account_id)
+        logger.info(
+            "投稿失敗のためキューから除外（次回は別作品）: %s - %s",
+            screen_name,
+            item_id,
+        )
+    except Exception as e:
+        logger.error(
+            "🚨 失敗時のキュー除外マークに失敗: %s (%s)",
+            screen_name,
+            e,
+        )
 
 
 def main() -> None:
@@ -119,6 +142,9 @@ def main() -> None:
                 config.get("screen_name", account_id),
                 e,
             )
+            _exclude_item_after_post_failure(
+                item_id, account_id, config.get("screen_name", account_id)
+            )
             time.sleep(SLEEP_SECONDS_AFTER_POST)
             continue
 
@@ -127,6 +153,9 @@ def main() -> None:
                 "⚠ Twitter投稿失敗: %s - %s",
                 config.get("screen_name", account_id),
                 twitter_result[1],
+            )
+            _exclude_item_after_post_failure(
+                item_id, account_id, config.get("screen_name", account_id)
             )
             time.sleep(SLEEP_SECONDS_AFTER_POST)
             continue
