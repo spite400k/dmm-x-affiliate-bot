@@ -6,22 +6,13 @@ from db.post_repository import get_next_post, mark_post_as_posted
 # from threads_api.threads_service import post_full_thread
 from twitter_api.tweet_service import post_full_twitter
 import os
-
+from utils.logger import setup_logger
 # ---------------------
 # ログ設定
 # ---------------------
-os.makedirs("logs", exist_ok=True)  
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("logs/tweet.log", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
+setup_logger("main.log")
 
-logger = logging.getLogger(__name__)
 
 # ---------------------
 # キャンペーン整形関数
