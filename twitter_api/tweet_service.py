@@ -301,20 +301,21 @@ def post_full_twitter(
 
             authors_text = " ".join(f"#{name}" for name in selected)
 
-            post_text += f"\n\n #DMM #マンガ #無料 #{title} {authors_text}\n\n{portal}"
+            post_text += f"\n\n #マンガ #無料\n\n"
         else:
 
             # actresses を正規化
             actress_names = normalize(actresses)
 
             # ランダム3名
-            selected = random.sample(actress_names, k=min(3, len(actress_names)))
+            selected = random.sample(actress_names, k=min(1, len(actress_names)))
 
             # #タグ化
             actress_text = " ".join(f"#{name}" for name in selected)
 
-            post_text += f"\n\n #FANZA #動画 #AV #成人マンガ #セール #無料 {actress_text}\n\n{portal}"
+            post_text += f"\n\n #FANZA #無料 {actress_text}\n\n"
 
+        post_text += f"\n\n 詳細はリプで【PR】👇"
         logger.info(f"🚨 ポスト: {post_text}")
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         if tweet_id:
@@ -343,8 +344,9 @@ def post_full_twitter(
             #     tweet_id = int(tweet_id)
             # logger.info(f"🏁 アフィリンク投稿完了 tweet_id={tweet_id}")
 
-
-            text2 = f"\n\n今までに紹介した作品はここから読めるよ【PR】👇\n\n{portal}"
+            wait_time = random.uniform(300, 600)
+            time.sleep(wait_time)
+            text2 = f"\n\n紹介した作品はここから読めるよ【PR】👇\n\n{portal}"
             final_id = safe_post_tweet(client_v2, text2, reply_to=tweet_id)
             logger.info(f"🏁 アーカイブ固定ポスト完了 final_tweet_id={final_id}")
 
