@@ -1,0 +1,176 @@
+あなたはシニアバックエンドエンジニアです。
+Pythonで「X自動投稿＋記事誘導＋スケジューラ」の完全システムを構築してください。
+
+# 🎯 目的
+・Supabaseに保存された投稿データを元にXへ自動投稿
+・投稿後にリプライで記事URLを送信
+・cronで定期実行し完全自動化する
+
+---
+
+# 🧩 技術構成
+- 言語：Python 3.11+
+- DB：Supabase（PostgreSQL）
+- HTTP：httpx
+- スケジューラ：cron想定
+- 環境変数：.envで管理
+
+---
+
+# 📦 実装機能
+
+## ① 投稿取得
+Supabaseのtrn_postsから以下条件で取得：
+
+- status = 'scheduled'
+- scheduled_at <= 現在時刻
+
+---
+
+## ② X投稿処理
+
+### 要件
+- X API v2を使用
+- OAuth 1.0a または OAuth2対応
+- 画像投稿にも対応（将来拡張）
+
+### 処理
+- contentを投稿
+- tweet_idを取得
+
+---
+
+## ③ 投稿後処理
+
+- trn_posts更新：
+  - status → 'posted'
+  - posted_at
+  - tweet_id
+
+---
+
+## ④ リプライ投稿
+
+### 要件
+- 投稿から5分後に実行
+- tweet_idに対して返信
+
+### 内容
+- 記事URL（例：https://your-site.com/articles/{id}）
+
+---
+
+## ⑤ リプライ管理
+
+### テーブル：trn_post_replies
+- id
+- post_id
+- content
+- scheduled_at
+- posted_at
+
+---
+
+## ⑥ リプライ処理
+
+条件：
+- scheduled_at <= 現在時刻
+- posted_at is null
+
+処理：
+- reply投稿
+- posted_at更新
+
+---
+
+## ⑦ スケジューラ
+
+main.pyで以下を実行：
+
+1. 投稿処理
+2. リプライ処理
+
+---
+
+# 🗄 Supabaseテーブル
+
+## trn_posts
+- id
+- content
+- article_id
+- status
+- scheduled_at
+- posted_at
+- tweet_id
+
+## trn_post_replies
+- id
+- post_id
+- content
+- scheduled_at
+- posted_at
+
+---
+
+# 📁 ファイル構成
+
+- main.py（エントリーポイント）
+- scheduler.py
+- services/
+  - x_service.py
+  - supabase_service.py
+- utils/
+  - logger.py
+
+---
+
+# ⚙️ 技術要件
+
+- httpxでAPI通信
+- エラーハンドリング必須
+- ログ出力（INFO / ERROR）
+- retry処理（最低3回）
+- タイムアウト設定
+- 型ヒントあり
+
+---
+
+# 🔐 環境変数
+
+- SUPABASE_URL
+- SUPABASE_SERVICE_ROLE_KEY
+- X_API_KEY
+- X_API_SECRET
+- X_ACCESS_TOKEN
+- X_ACCESS_SECRET
+
+---
+
+# 🧠 処理フロー
+
+1. 現在時刻取得
+2. scheduled投稿取得
+3. X投稿
+4. DB更新
+5. リプライを5分後で作成
+6. scheduledリプライ取得
+7. リプライ投稿
+8. DB更新
+
+---
+
+# 🚀 出力してほしいもの
+
+1. 全コード（動作する完全版）
+2. 実行手順
+3. cron設定例（1分ごと）
+4. エラー時の挙動説明
+
+---
+
+# 💡 重要
+
+- 実際に動くコードを書くこと
+- ダミー実装は禁止
+- 初心者でも動かせるレベルで書くこと
+- 実運用を想定すること
