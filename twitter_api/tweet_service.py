@@ -7,6 +7,7 @@ import time
 import random
 import requests
 import tweepy
+from twitter_api.safe_post import safe_post_tweet
 from twitter_api.twitter_client import get_clients
 from utils.get_sample_movie import get_video_from_supabase
 from utils.image import download_images
@@ -130,53 +131,6 @@ def upload_video_v1(api_v1, video_path: str) -> str:
     except Exception as e:
         logger.exception(f"❌ 動画アップロード失敗: {abs_path} → {e}")
         return ""
-
-
-# ---------------------
-# 投稿処理（v2）+ レート制限対応 + リトライ処理あり
-# ---------------------
-def safe_post_tweet(client, text, media_ids=None, reply_to: str =None, max_retries=5):
-    """
-    Twitterに安全に投稿する。レート制限が来たら待機してリトライ。
-    """
-    for attempt in range(max_retries):
-        try:
-            response = client.create_tweet(
-                text=text,
-                media_ids=media_ids if media_ids else None,
-                in_reply_to_tweet_id=str(reply_to) if reply_to and str(reply_to).isdigit() else None
-            )
-            logger.info(f"✅ 投稿成功: {response.data}")
-            return response.data["id"]
-
-        except tweepy.errors.TooManyRequests as e:
-            # レート制限 → ヘッダーから再試行時刻を計算
-            reset_time = int(e.response.headers.get("x-rate-limit-reset", time.time() + 300))
-            wait_time = max(reset_time - int(time.time()), 60)  # 最低60秒
-            logger.warning(f"⚠️ レート制限 → {wait_time}秒待機 (attempt {attempt+1}/{max_retries})")
-            time.sleep(wait_time)
-
-            if wait_time > 600:
-                logger.error("❌ 待機時間が長すぎるため投稿中止")
-                return None
-            
-        except tweepy.errors.TwitterServerError as e:
-            logger.warning("⚠ Xサーバーエラー。指数バックオフで再試行")
-            wait = (2 ** attempt) + random.uniform(0, 3)
-            time.sleep(wait)
-
-        except tweepy.errors.Forbidden as e:
-            logger.critical("❌ 権限エラー。プランまたはトークン確認")
-            return None
-            
-
-
-        except Exception as e:
-            logger.error(f"❌ 投稿失敗 (attempt {attempt+1}/{max_retries}): {e}", exc_info=True)
-            time.sleep(10)
-
-    logger.error("❌ 最大リトライ回数を超えました → 投稿中止")
-    return None
 
 
 # ---------------------
