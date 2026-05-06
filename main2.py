@@ -6,11 +6,11 @@ import tweepy
 # .env ファイルを読み込む
 load_dotenv()
 # Twitter Deverloper Portalで取得
-consumer_key = os.getenv("API_KEY")
-consumer_secret =  os.getenv("API_SECRET")
-bearer_token = os.getenv("BEARER_TOKEN")
-access_token = os.getenv("ACCESS_TOKEN")
-access_token_secret = os.getenv("ACCESS_SECRET")
+consumer_key = os.getenv("CONSUMER_KEY_1")
+consumer_secret =  os.getenv("CONSUMER_SECRET_KEY_1")
+bearer_token = os.getenv("BEARER_TOKEN_1")
+access_token = os.getenv("ACCESS_TOKEN_1")
+access_token_secret = os.getenv("ACCESS_TOKEN_SECRET_1")
 
 # Client (テキスト投稿用)
 client = tweepy.Client(bearer_token=bearer_token,

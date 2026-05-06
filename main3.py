@@ -6,8 +6,8 @@ load_dotenv()
 # ------------------------------
 # 1. 認証情報（OAuth1.0a ユーザーコンテキスト）
 # ------------------------------
-CONSUMER_KEY = os.getenv("API_KEY_2")
-CONSUMER_SECRET = os.getenv("API_SECRET_KEY_2")
+CONSUMER_KEY = os.getenv("CONSUMER_KEY_2")
+CONSUMER_SECRET = os.getenv("CONSUMER_SECRET_KEY_2")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN_2")
 ACCESS_TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET_2")
 if not all([CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET]):
