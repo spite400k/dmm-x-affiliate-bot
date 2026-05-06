@@ -1,5 +1,6 @@
 """
-週間ランキングページをリストからランダムに1件選び取得し、X に投稿する（main.py と同じ認証・クライアントを利用）。
+週間ランキングを main.py と同様にアカウント単位で処理し、
+WEEKLY_RANKING_SEQUENCE の第2要素がそのアカウントIDと一致する URL のみ取得・投稿する。
 
 環境変数 DRY_RUN=1 のときは投稿せず本文のみログ出力する。
 """
@@ -8,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import random
 import time
 
 from config.settings import ACCOUNT_SETTINGS
@@ -20,7 +20,8 @@ from utils.portal_ranking import RankingPage, fetch_weekly_ranking
 setup_logger("main_weekly_ranking.log")
 logger = logging.getLogger(__name__)
 
-# (ランキングページ URL, Twitter アカウント ID main の ACCOUNT_SETTINGS と同一キー)
+# (ランキングページ URL, Twitter アカウント ID … settings.ACCOUNT_SETTINGS と同一キー)
+# main2.py は API_KEY_1 固定。FANZA 行が "2" のときは get_clients("2")→403 になり main2 と差が出る。
 WEEKLY_RANKING_SEQUENCE: list[tuple[str, str]] = [
     ("https://www.fanzaportal.com/ranking/videoa/weekly", "2"),
     ("https://www.fanzaportal.com/ranking/videoc/weekly", "2"),
@@ -134,59 +135,66 @@ def log_ranking_post_content(
 def main() -> None:
     dry = os.environ.get("DRY_RUN", "").strip() in ("1", "true", "yes", "on")
 
-    for url, account_id in (random.choice(WEEKLY_RANKING_SEQUENCE),):
-        cfg = ACCOUNT_SETTINGS.get(account_id)
-        if not cfg or not cfg.get("enabled"):
+    for account_id, config in ACCOUNT_SETTINGS.items():
+        if not config.get("enabled"):
             logger.info(
-                "スキップ（アカウント無効）: %s → account=%s",
-                url,
-                account_id,
+                "⚠️ %s は実施フラグOFFのためスキップします",
+                config.get("screen_name", account_id),
             )
             continue
 
-        try:
-            page = fetch_weekly_ranking(url)
-        except Exception as e:
-            logger.exception("取得失敗: %s (%s)", url, e)
-            continue
-
-        if not page:
-            continue
-
-        text = build_ranking_tweet(url, page)
-        screen = cfg.get("screen_name", account_id)
-        log_ranking_post_content(
-            logger,
-            url=url,
-            account_id=account_id,
-            screen_name=screen,
-            page=page,
-            tweet_text=text,
-            dry_run=dry,
-        )
-
-        if dry:
-            time.sleep(1)
-            continue
-
-        try:
-            _, client_v2 = get_clients(account_id)
-        except Exception as e:
-            logger.error("Twitter クライアント取得失敗 account=%s: %s", account_id, e)
-            continue
-
-        tweet_id = safe_post_tweet(client_v2, text)
-        if tweet_id:
+        matches = [(u, a) for u, a in WEEKLY_RANKING_SEQUENCE if a == account_id]
+        if not matches:
             logger.info(
-                "✅ 投稿完了 (%s) tweet_id=%s body_char_count=%s",
-                screen,
-                tweet_id,
-                len(text),
+                "⚠️ %s は週間ランキングの対象URLが定義されていません",
+                config.get("screen_name", account_id),
             )
-        else:
-            logger.warning("⚠ 投稿失敗 (%s): %s", screen, url)
+            continue
 
-        time.sleep(SLEEP_SECONDS_BETWEEN_POSTS)
+        for url, _ in matches:
+            try:
+                page = fetch_weekly_ranking(url)
+            except Exception as e:
+                logger.exception("取得失敗: %s (%s)", url, e)
+                continue
+
+            if not page:
+                continue
+
+            text = build_ranking_tweet(url, page)
+            screen = config.get("screen_name", account_id)
+            log_ranking_post_content(
+                logger,
+                url=url,
+                account_id=account_id,
+                screen_name=screen,
+                page=page,
+                tweet_text=text,
+                dry_run=dry,
+            )
+
+            if dry:
+                time.sleep(1)
+                continue
+
+            try:
+                _, client_v2 = get_clients(account_id)
+            except Exception as e:
+                logger.error("Twitter クライアント取得失敗 account=%s: %s", account_id, e)
+                break
+
+            tweet_id = safe_post_tweet(client_v2, text)
+            if tweet_id:
+                logger.info(
+                    "✅ 投稿完了 (%s) tweet_id=%s body_char_count=%s",
+                    screen,
+                    tweet_id,
+                    len(text),
+                )
+            else:
+                logger.warning("⚠ 投稿失敗 (%s): %s", screen, url)
+
+            time.sleep(SLEEP_SECONDS_BETWEEN_POSTS)
 
 
 if __name__ == "__main__":
