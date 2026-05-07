@@ -16,6 +16,11 @@ Playwright:
   LIVEDOOR_ID / LIVEDOOR_PASSWORD=（ログイン用）
   LIVEDOOR_NEW_ENTRY_URL=（例: https://livedoor.blogcms.jp/blog/ブログ名/article/edit）
   必要に応じ LIVEDOOR_TITLE_SELECTOR / LIVEDOOR_BODY_SELECTOR で CSS を上書き。
+
+記事 HTML の体裁:
+  LIVEDOOR_ARTICLE_STYLE=simple（既定）…従来のフラットな段落。
+  LIVEDOOR_ARTICLE_STYLE=popular …リード・h2 見出し・ヒーロー画像・末尾の
+    購入案内リストなど、読みやすい長文記事風（人気ブログの一般的な構成を参考）。
 """
 
 from __future__ import annotations
@@ -75,13 +80,22 @@ def livedoor_blog_ready() -> bool:
     )
 
 
-def build_livedoor_blog_html(
+def _article_style(article_style: str | None) -> str:
+    raw = (
+        article_style
+        if article_style is not None
+        else os.environ.get("LIVEDOOR_ARTICLE_STYLE", "simple")
+    ).strip().lower()
+    return raw if raw in ("simple", "popular") else "simple"
+
+
+def _build_simple_livedoor_html(
     *,
     title: str,
     twitter_text: str,
     affiliate_url: str,
     portal_url: str,
-    image_large_url: str = "",
+    image_large_url: str,
 ) -> str:
     parts: list[str] = []
     parts.append(f"<h1>{html_module.escape(title)}</h1>")
@@ -105,6 +119,110 @@ def build_livedoor_blog_html(
             f'<p><a href="{u}" rel="nofollow sponsored">公式サイト・購入はこちら（PR）</a></p>'
         )
     return "\n".join(parts)
+
+
+def _build_popular_livedoor_html(
+    *,
+    title: str,
+    twitter_text: str,
+    affiliate_url: str,
+    portal_url: str,
+    image_large_url: str,
+    summary: str,
+    point: str,
+    comment: str,
+) -> str:
+    """長文レビュー風＋末尾に公式誘導ブロック（PR）。"""
+    esc = html_module.escape
+    blocks = [b.strip() for b in twitter_text.split("\n\n") if b.strip()]
+    parts: list[str] = []
+    parts.append('<article class="ld-aff-post">')
+    parts.append(f"<h1>{esc(title)}</h1>")
+    if image_large_url.strip():
+        u = esc(image_large_url.strip(), quote=True)
+        parts.append(
+            f'<figure class="hero"><img src="{u}" alt="{esc(title)}" loading="lazy" /></figure>'
+        )
+    lead = (comment or "").strip()
+    if lead:
+        inner = esc(lead).replace("\n", "<br />\n")
+        parts.append(
+            '<p class="lead" style="font-size:105%;line-height:1.75;">'
+            f"<strong>{inner}</strong></p>"
+        )
+    if summary.strip():
+        parts.append("<h2>概要・あらすじ</h2>")
+        parts.append("<p>" + esc(summary.strip()).replace("\n", "<br />\n") + "</p>")
+    if point.strip():
+        parts.append("<h2>注目ポイント・推しどころ</h2>")
+        parts.append("<p>" + esc(point.strip()).replace("\n", "<br />\n") + "</p>")
+    seen: set[str] = {title.strip()}
+    if lead:
+        seen.add(lead)
+    if summary.strip():
+        seen.add(summary.strip())
+    if point.strip():
+        seen.add(point.strip())
+    extra = [b for b in blocks if b not in seen]
+    if extra:
+        parts.append("<h2>作品紹介・お得情報</h2>")
+        for b in extra:
+            parts.append("<p>" + esc(b).replace("\n", "<br />\n") + "</p>")
+    if portal_url.strip() or affiliate_url.strip():
+        parts.append("<h2>詳細・購入のご案内（PR）</h2>")
+        parts.append("<ul>")
+        if portal_url.strip():
+            u = esc(portal_url.strip(), quote=True)
+            parts.append(
+                f'<li><a href="{u}" rel="nofollow sponsored">'
+                "ポータルで内容チェック・関連作品を見る</a></li>"
+            )
+        if affiliate_url.strip():
+            u = esc(affiliate_url.strip(), quote=True)
+            parts.append(
+                f'<li><a href="{u}" rel="nofollow sponsored">'
+                "公式ページの詳細・購入はこちら</a></li>"
+            )
+        parts.append("</ul>")
+    parts.append(
+        "<p><small>※本記事には広告・アフィリエイト（PR）リンクが含まれる場合があります。"
+        "</small></p>"
+    )
+    parts.append("</article>")
+    return "\n".join(parts)
+
+
+def build_livedoor_blog_html(
+    *,
+    title: str,
+    twitter_text: str,
+    affiliate_url: str,
+    portal_url: str,
+    image_large_url: str = "",
+    summary: str = "",
+    point: str = "",
+    comment: str = "",
+    article_style: str | None = None,
+) -> str:
+    style = _article_style(article_style)
+    if style == "popular":
+        return _build_popular_livedoor_html(
+            title=title,
+            twitter_text=twitter_text,
+            affiliate_url=affiliate_url,
+            portal_url=portal_url,
+            image_large_url=image_large_url,
+            summary=summary,
+            point=point,
+            comment=comment,
+        )
+    return _build_simple_livedoor_html(
+        title=title,
+        twitter_text=twitter_text,
+        affiliate_url=affiliate_url,
+        portal_url=portal_url,
+        image_large_url=image_large_url,
+    )
 
 
 def _build_atom_entry_xml(title: str, body_html: str, draft: bool) -> bytes:

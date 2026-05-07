@@ -213,6 +213,9 @@ def main() -> None:
                     affiliate_url=affiliate_url,
                     portal_url=portal_url,
                     image_large_url=image_large_url or image_small_url,
+                    summary=summary,
+                    point=point,
+                    comment=comment,
                 )
                 if dry:
                     logger.info(
