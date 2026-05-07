@@ -1,18 +1,36 @@
 """
-ライブドアブログへ AtomPub API だけで1件投稿するスタンドアロンスクリプト。
+ライブドアブログへ AtomPub API で1件投稿するスタンドアロンスクリプト。
 
-main.py と同じ livedoor_blog.post を使います。.env に次を設定してください。
-  LIVEDOOR_ID
-  LIVEDOOR_ATOMPUB_PASSWORD  （ブログ設定 > その他 > API Key の AtomPub用）
-  LIVEDOOR_BLOG_NAME           （例: yorunoosusume.doorblog.jp なら yorunoosusume）
+既定: Supabase（trn_dmm_items）から未投稿1件を取得し、main.py と同じ要領で HTML を組み立てて投稿する。
+
+.env:
+  LIVEDOOR_ID, LIVEDOOR_ATOMPUB_PASSWORD, LIVEDOOR_BLOG_NAME
+  SUPABASE_URL_{ACCOUNT}, SUPABASE_KEY_{ACCOUNT}（ACCOUNT は既定 1 → _1）
+  LIVEDOOR_ARTICLE_STYLE=popular …長文レビュー風 HTML（simple で従来どおり）
 
 使用例:
-  python post_livedoor_atompub.py "記事タイトル" --body "<p>本文HTML</p>"
-  python post_livedoor_atompub.py "タイトル" --body-file article.html
-  python post_livedoor_atompub.py "下書き" --body "<p>...</p>" --draft
+  python post_livedoor_atompub.py --service ebook --floor comic
+  python post_livedoor_atompub.py --account 2 --service digital --floor videoa --draft
+  python post_livedoor_atompub.py --manual "テスト" --body "<p>HTML</p>"
+
+手動デバッグをソースに直書きする場合:
+  下の MANUAL_DEBUG_FROM_SOURCE を True にし、DEBUG_MANUAL_TITLE / DEBUG_MANUAL_BODY_HTML を編集して
+  `python post_livedoor_atompub.py` のように引数なしで実行できる（--draft は併用可）。
+
+ファイル末尾の _argv_override に、--account / --service / --floor などをリストで書いても同様に指定できる。
 """
 
 from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# 手動デバッグ（ソース内指定）
+# True のとき、Supabase も CLI の --manual も使わず、次の定数だけで AtomPub 投稿する。
+# 運用コミット時は必ず False に戻すこと。
+# ---------------------------------------------------------------------------
+MANUAL_DEBUG_FROM_SOURCE = True
+DEBUG_MANUAL_TITLE = "ソース内デバッグタイトル"
+DEBUG_MANUAL_BODY_HTML = """<p>ここに HTML 本文を直接書けます。</p>
+<p>CDATA 内に入るため、本文に <code>]]&gt;</code> 連続は避けてください。</p>"""
 
 import argparse
 import logging
@@ -21,9 +39,33 @@ import sys
 
 from dotenv import load_dotenv
 
-from livedoor_blog.post import post_to_livedoor_blog
+from config.settings import ACCOUNT_SETTINGS
+from db.post_repository import get_next_post, mark_post_as_posted
+from livedoor_blog.post import (
+    build_livedoor_blog_html,
+    post_to_livedoor_blog,
+)
+from twitter_api.tweet_service import format_campaigns
 
 logger = logging.getLogger(__name__)
+
+
+def build_twitter_text(
+    title: str,
+    comment: str,
+    summary: str,
+    point: str,
+    campaigns: list | None,
+    affiliate_url: str,
+) -> str:
+    """main.py の build_twitter_text と同じ（Livedoor 用本文ブロック）。"""
+    parts: list[str] = [title]
+    if comment:
+        parts.append(comment)
+    campaign_text = format_campaigns(campaigns)
+    if campaign_text:
+        parts.append(campaign_text)
+    return "\n\n".join(parts)
 
 
 def _require_env(names: tuple[str, ...]) -> None:
@@ -36,6 +78,15 @@ def _require_env(names: tuple[str, ...]) -> None:
         sys.exit(1)
 
 
+def _dry_run() -> bool:
+    return os.environ.get("DRY_RUN", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 def main() -> None:
     load_dotenv()
     logging.basicConfig(
@@ -46,34 +97,49 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="ライブドアブログ AtomPub で記事を1件投稿します。",
     )
-    parser.add_argument("title", help="記事タイトル（プレーンテキスト）")
-    g = parser.add_mutually_exclusive_group(required=True)
-    g.add_argument(
-        "--body",
-        dest="body",
-        help="記事本文（HTML。CDATA 内に入るため ]]></ 系に注意）",
+    parser.add_argument(
+        "--manual",
+        action="store_true",
+        help="Supabase を使わず、タイトルと本文を直接指定する",
     )
-    g.add_argument(
+    parser.add_argument(
+        "title",
+        nargs="?",
+        help="--manual のとき必須。通常モードでは Supabase のタイトルを使うため不要",
+    )
+    parser.add_argument(
+        "--account",
+        default="1",
+        help="Supabase 接続に使うアカウント番号（SUPABASE_URL_1 等）。既定: 1",
+    )
+    parser.add_argument(
+        "--service",
+        help="未投稿行の service（例: ebook, digital）。--manual でないとき必須",
+    )
+    parser.add_argument(
+        "--floor",
+        help="未投稿行の floor（例: comic, videoa）。--manual でないとき必須",
+    )
+    mg = parser.add_mutually_exclusive_group()
+    mg.add_argument("--body", dest="body", help="--manual 時の本文 HTML")
+    mg.add_argument(
         "--body-file",
         dest="body_file",
         metavar="PATH",
-        help="本文HTMLを読み込むファイル（UTF-8）",
+        help="--manual 時、本文 HTML を UTF-8 ファイルから読み込む",
     )
     parser.add_argument(
         "--draft",
         action="store_true",
-        help="下書きとして投稿（LIVEDOOR_ATOMPUB_DRAFT を一時的に有効化）",
+        help="下書きとして投稿",
+    )
+    parser.add_argument(
+        "--no-mark-posted",
+        action="store_true",
+        help="投稿成功後も Supabase の is_posted を立てない（検証用）",
     )
     args = parser.parse_args()
 
-    if args.body_file:
-        path = os.path.abspath(args.body_file)
-        with open(path, encoding="utf-8") as f:
-            body_html = f.read()
-    else:
-        body_html = args.body or ""
-
-    # このスクリプトでは AtomPub のみ（main の LIVEDOOR_BLOG_ENABLED に依存しない）
     os.environ["LIVEDOOR_BLOG_ENABLED"] = "1"
     os.environ["LIVEDOOR_POST_METHOD"] = "atompub"
     if args.draft:
@@ -83,14 +149,120 @@ def main() -> None:
         ("LIVEDOOR_ID", "LIVEDOOR_ATOMPUB_PASSWORD", "LIVEDOOR_BLOG_NAME"),
     )
 
+    manual_from_source = False
+    if MANUAL_DEBUG_FROM_SOURCE:
+        if not DEBUG_MANUAL_TITLE.strip() or not str(DEBUG_MANUAL_BODY_HTML).strip():
+            logger.error(
+                "MANUAL_DEBUG_FROM_SOURCE 利用時は DEBUG_MANUAL_TITLE と "
+                "DEBUG_MANUAL_BODY_HTML を編集してください（空不可）"
+            )
+            sys.exit(1)
+        title = DEBUG_MANUAL_TITLE.strip()
+        body_html = DEBUG_MANUAL_BODY_HTML
+        item_id = None
+        manual_from_source = True
+        logger.info("手動デバッグ: ソース内の DEBUG_MANUAL_* を使用して投稿します")
+
+    elif args.manual:
+        if not args.title:
+            parser.error("--manual のときは記事タイトルを先頭の位置引数で指定してください")
+        if not args.body and not args.body_file:
+            parser.error("--manual のときは --body か --body-file が必要です")
+        if args.body_file:
+            path = os.path.abspath(args.body_file)
+            with open(path, encoding="utf-8") as f:
+                body_html = f.read()
+        else:
+            body_html = args.body or ""
+        title = args.title
+        item_id = None
+    else:
+        if not args.service or not args.floor:
+            parser.error(
+                "Supabase から取得するには --service と --floor を指定してください"
+            )
+        post = get_next_post(args.service, args.floor, args.account)
+        if not post:
+            logger.error(
+                "投稿対象なし: account=%s service=%s floor=%s",
+                args.account,
+                args.service,
+                args.floor,
+            )
+            sys.exit(2)
+
+        item_id = post["id"]
+        content_id = post["content_id"]
+        service = post["service"]
+        floor = post["floor"]
+        affiliate_url = post["affiliate_url"]
+        image_large_url = post.get("image_large_url", "")
+        image_small_url = post.get("image_small_url", "")
+        comment = post.get("auto_comment", "")
+        summary = post.get("auto_summary", "")
+        point = post.get("auto_point", "")
+        campaigns = post.get("campaign") or []
+
+        cfg = ACCOUNT_SETTINGS.get(args.account, {})
+        site = cfg.get("site", "fanza")
+        if site == "dmm":
+            portal_url = f"https://dmmportal.jp/{service}/{floor}/{content_id}"
+        else:
+            portal_url = f"https://fanzaportal.com/{floor}/{content_id}"
+
+        title = post["title"]
+        twitter_text = build_twitter_text(
+            title,
+            comment,
+            summary,
+            point,
+            campaigns,
+            affiliate_url,
+        )
+        body_html = build_livedoor_blog_html(
+            title=title,
+            twitter_text=twitter_text,
+            affiliate_url=affiliate_url,
+            portal_url=portal_url,
+            image_large_url=image_large_url or image_small_url,
+            summary=summary,
+            point=point,
+            comment=comment,
+        )
+        logger.info("Supabase 取得: %s - %s", item_id, title)
+
+    dry = _dry_run()
+    if dry:
+        logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:800])
+        sys.exit(0)
+
     try:
-        post_to_livedoor_blog(args.title, body_html)
+        post_to_livedoor_blog(title, body_html)
     except Exception as e:
         logger.exception("投稿に失敗しました: %s", e)
         sys.exit(1)
 
-    logger.info("投稿が完了しました: %s", args.title)
+    if (
+        not manual_from_source
+        and not args.manual
+        and item_id
+        and not args.no_mark_posted
+    ):
+        try:
+            mark_post_as_posted(item_id, args.account)
+            logger.info("Supabase 投稿済みマーク: %s", item_id)
+        except Exception as e:
+            logger.exception("投稿済みマークに失敗しました（ブログは投稿済み）: %s", e)
+            sys.exit(1)
+
+    logger.info("投稿が完了しました: %s", title)
 
 
 if __name__ == "__main__":
+    # ターミナルに渡さず、ここに argparse と同じ並びで書く（空 [] なら通常の sys.argv）
+    # 例: ["--account", "1", "--service", "ebook", "--floor", "comic", "--draft"]
+    # 例: ["--manual", "タイトル", "--body", "<p>HTML</p>"]
+    _argv_override: list[str] = ["--account", "2", "--service", "digital", "--floor", "videoa", "--draft"]
+    if _argv_override:
+        sys.argv = [sys.argv[0]] + _argv_override
     main()
