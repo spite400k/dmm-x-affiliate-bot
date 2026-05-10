@@ -110,7 +110,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--account",
-        default="1",
+        default="2",
         help="Supabase 接続に使うアカウント番号（SUPABASE_URL_1 等）。既定: 1",
     )
     parser.add_argument(

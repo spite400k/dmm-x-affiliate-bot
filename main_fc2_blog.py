@@ -2,20 +2,24 @@
 FC2ブログへ XML-RPC（metaWeblog.newPost）で自動投稿するエントリポイント。
 
 main.py と同様に config.settings.ACCOUNT_SETTINGS と DB キュー（get_next_post）を利用する。
+FC2 のブログID・ユーザー名・XML-RPCパスワードは Supabase のマスタテーブルから取得する。
 
-必要な環境変数（ブログ管理画面の「環境設定」等で XML-RPC 用パスワードを発行し、
-ブログIDは管理画面左上などに表示される数値）:
-  FC2_BLOG_ID       … ブログID（数値文字列）
-  FC2_USERNAME      … FC2ID のメールアドレス（XML-RPC ログイン名）
-  FC2_PASSWORD      … XML-RPC 用パスワード（ブログ管理画面で設定）
+既定マスタテーブル: mst_blog_accounts
+必須カラム:
+  account_id, platform, enabled, blog_id, username, api_password
+任意カラム:
+  blog_key, xmlrpc_url
 
-口座ごとに別ブログへ出し分ける場合はサフィックス _{account_id} を付与:
-  FC2_BLOG_ID_1, FC2_USERNAME_1, FC2_PASSWORD_1
-未設定のキーは共通の FC2_* にフォールバックする。
+FC2 の行は platform='fc2', enabled=true にする。
+ライブドアは同テーブルで platform='livedoor'（post_livedoor_atompub が
+db/blog_repository を参照。main.py はブログ投稿を行わない）。
+
+blog_key は trn_dmm_item_blog_post_status.blog_key と一致する投稿済み管理キー。
+未指定時は fc2:{account_id}:{blog_id}（FC2）／ livedoor:{blog_id}（ライブドア）を自動生成する。
 
 任意:
-  FC2_XMLRPC_URL    … 既定 http://blog.fc2.com/xmlrpc.php
-  DRY_RUN=1         … 投稿せず本文のみログ（.env の他スクリプトと同様）
+  BLOG_ACCOUNT_MASTER_TABLE … マスタテーブル名（省略時 mst_blog_accounts）
+  DRY_RUN=1                 … 投稿せず本文のみログ（.env の他スクリプトと同様）
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from config.settings import ACCOUNT_SETTINGS
+from db.blog_repository import get_enabled_fc2_blog_config
 from db.post_repository import (
     get_next_post,
     mark_post_as_posted,
@@ -45,30 +50,6 @@ setup_logger("main_fc2_blog.log")
 logger = logging.getLogger(__name__)
 
 SLEEP_SECONDS_AFTER_POST = 10
-DEFAULT_XMLRPC_URL = "http://blog.fc2.com/xmlrpc.php"
-
-
-def _env_for_account(base: str, account_id: str) -> str | None:
-    v = os.getenv(f"{base}_{account_id}")
-    if v is not None and v != "":
-        return v
-    return os.getenv(base)
-
-
-def get_fc2_config(account_id: str) -> dict[str, str] | None:
-    """口座別または共通の FC2 接続情報を返す。必須が欠けていれば None。"""
-    blog_id = _env_for_account("FC2_BLOG_ID", account_id)
-    username = _env_for_account("FC2_USERNAME", account_id)
-    password = _env_for_account("FC2_PASSWORD", account_id)
-    xmlrpc_url = _env_for_account("FC2_XMLRPC_URL", account_id) or DEFAULT_XMLRPC_URL
-    if not blog_id or not username or not password:
-        return None
-    return {
-        "blog_id": blog_id,
-        "username": username,
-        "password": password,
-        "xmlrpc_url": xmlrpc_url,
-    }
 
 
 def build_fc2_description(
@@ -140,10 +121,10 @@ def meta_weblog_new_post(
 
 
 def _exclude_item_after_post_failure(
-    item_id: str, account_id: str, screen_name: str
+    item_id: str, account_id: str, blog_key: str, screen_name: str
 ) -> None:
     try:
-        mark_post_failed_skip_queue(item_id, account_id)
+        mark_post_failed_skip_queue(item_id, account_id, blog_key=blog_key)
         logger.info(
             "投稿失敗のためキューから除外（次回は別作品）: %s - %s",
             screen_name,
@@ -161,22 +142,21 @@ def main() -> None:
     dry = os.getenv("DRY_RUN", "").strip() in ("1", "true", "True", "yes", "YES")
 
     for account_id, config in ACCOUNT_SETTINGS.items():
-        if not config.get("enabled"):
+        if not config.get("enabled_blog"):
             logger.info(
-                "%s は実施フラグOFFのためスキップします",
+                "%s は enabled_blog=OFF のためスキップします",
                 config.get("screen_name", account_id),
             )
             continue
 
-        fc2 = get_fc2_config(account_id)
+        fc2 = get_enabled_fc2_blog_config(account_id)
         if not fc2:
-            logger.warning(
-                "FC2 環境変数が未設定のためスキップ: %s（FC2_BLOG_ID / FC2_USERNAME / FC2_PASSWORD）",
+            logger.info(
+                "FC2ブログマスタが未設定または無効のためスキップ: %s",
                 config.get("screen_name", account_id),
             )
             continue
 
-        site = config["site"]
         targets = config.get("targets", [])
         if not targets:
             logger.info(
@@ -189,7 +169,7 @@ def main() -> None:
         service = target["service"]
         floor = target["floor"]
 
-        post = get_next_post(service, floor, account_id)
+        post = get_next_post(service, floor, account_id, blog_key=fc2["blog_key"])
         if not post:
             logger.warning(
                 "投稿対象なし: %s (%s/%s)",
@@ -248,7 +228,10 @@ def main() -> None:
                 e.faultString,
             )
             _exclude_item_after_post_failure(
-                item_id, account_id, config.get("screen_name", account_id)
+                item_id,
+                account_id,
+                fc2["blog_key"],
+                config.get("screen_name", account_id),
             )
             time.sleep(SLEEP_SECONDS_AFTER_POST)
             continue
@@ -260,7 +243,10 @@ def main() -> None:
                 e,
             )
             _exclude_item_after_post_failure(
-                item_id, account_id, config.get("screen_name", account_id)
+                item_id,
+                account_id,
+                fc2["blog_key"],
+                config.get("screen_name", account_id),
             )
             time.sleep(SLEEP_SECONDS_AFTER_POST)
             continue
@@ -272,24 +258,29 @@ def main() -> None:
                 e,
             )
             _exclude_item_after_post_failure(
-                item_id, account_id, config.get("screen_name", account_id)
+                item_id,
+                account_id,
+                fc2["blog_key"],
+                config.get("screen_name", account_id),
             )
             time.sleep(SLEEP_SECONDS_AFTER_POST)
             continue
 
         logger.info(
-            "FC2 投稿完了: %s - item=%s postid=%s",
+            "FC2 投稿完了: %s - blog_key=%s item=%s postid=%s",
             config.get("screen_name", account_id),
+            fc2["blog_key"],
             item_id,
             post_id,
         )
 
         try:
-            mark_post_as_posted(item_id, account_id)
+            mark_post_as_posted(item_id, account_id, blog_key=fc2["blog_key"])
             logger.info(
-                "投稿済みマーク完了: %s - %s",
+                "投稿済みマーク完了: %s - %s (%s)",
                 config.get("screen_name", account_id),
                 item_id,
+                fc2["blog_key"],
             )
         except Exception as e:
             logger.error(
