@@ -1,6 +1,15 @@
+import os
+
+# ライブドア等で Supabase の trn_dmm_item_blog_post_status.blog_key と一致させる
+LIVEDOOR_BLOG_POST_KEY = (
+    os.environ.get("LIVEDOOR_BLOG_POST_KEY", "livedoor:写真集のおすすめ").strip()
+    or "livedoor:写真集のおすすめ"
+)
+
 ACCOUNT_SETTINGS = {
     "1": {
-        "enabled": True,
+        "enabled": False,
+        "enabled_blog": False,
         "site":"dmm",
         "screen_name": "yuki23675786",
         "targets": [
@@ -12,6 +21,7 @@ ACCOUNT_SETTINGS = {
     },
     "2": {
         "enabled": True,
+        "enabled_blog": True,
         "site":"fanza",
         "screen_name": "Ren47291",
         "targets": [
@@ -24,6 +34,7 @@ ACCOUNT_SETTINGS = {
     },
     "3": {
         "enabled": False,
+        "enabled_blog": False,
         "screen_name": "Sora36100",
         "targets": [
             # {"service": "doujin", "floor": "digital_doujin"},  # 同人誌
@@ -33,11 +44,13 @@ ACCOUNT_SETTINGS = {
     },
     "4": {
         "enabled": False,
+        "enabled_blog": False,
         "screen_name": "AdultSelectLab",
         "targets": [],  # 投稿ジャンルなし
     },
     "5": {
         "enabled": False,
+        "enabled_blog": False,
         "screen_name": "fanza_portal_1",
         "targets": [
             # {"service": "digital", "floor": "anime"},   # ←コメントアウトしていたものも残せる

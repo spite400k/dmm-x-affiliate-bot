@@ -7,9 +7,12 @@ AtomPub（既定）:
   LIVEDOOR_BLOG_ENABLED=1
   LIVEDOOR_POST_METHOD=atompub  （省略可）
   LIVEDOOR_ID=（livedoor ID）
-  LIVEDOOR_BLOG_NAME=（AtomPub の BLOG_NAME。例: https://yorunoosusume.doorblog.jp/ なら yorunoosusume。
-    管理画面の /blog/foo/article/edit の foo と一致することが多い）
+  LIVEDOOR_BLOG_NAME=（AtomPub URL の /atompub/ 直後の識別子。
+    例: https://livedoor.blogcms.jp/atompub/spite400k-dkg6rbhs なら spite400k-dkg6rbhs）
   LIVEDOOR_ATOMPUB_PASSWORD=（管理画面 ブログ設定 > その他 > API Key の AtomPub用パスワード）
+  LIVEDOOR_ATOMPUB_COLLECTION_TMPL=（任意。POST 先 URL。{blog_name} を置換。
+    省略時は https://livedoor.blogcms.jp/atompub/{blog_name} 。
+    旧形式が必要なら …/atompub/{blog_name}/article を指定）
 
 Playwright:
   LIVEDOOR_POST_METHOD=playwright
@@ -35,7 +38,8 @@ import requests
 logger = logging.getLogger(__name__)
 
 LIVEDOOR_LOGIN_URL = "https://livedoor.blogcms.jp/member/"
-ATOMPUB_ARTICLE_TMPL = "https://livedoor.blogcms.jp/atompub/{blog_name}/article"
+# 記事エントリの POST 先（現行 blogcms は末尾に /article を付けない形式が多い）
+_DEFAULT_ATOMPUB_COLLECTION_TMPL = "https://livedoor.blogcms.jp/atompub/{blog_name}"
 
 _DEFAULT_TITLE_SELECTORS = (
     'input[name="article[title]"]',
@@ -225,6 +229,13 @@ def build_livedoor_blog_html(
     )
 
 
+def _atompub_collection_post_url(blog_name: str) -> str:
+    tpl = os.environ.get(
+        "LIVEDOOR_ATOMPUB_COLLECTION_TMPL", _DEFAULT_ATOMPUB_COLLECTION_TMPL
+    ).strip()
+    return tpl.format(blog_name=blog_name)
+
+
 def _build_atom_entry_xml(title: str, body_html: str, draft: bool) -> bytes:
     t = xml_escape(title)
     body_safe = body_html.replace("]]>", "]]]]><![CDATA[>")
@@ -251,7 +262,7 @@ def _post_atompub(title: str, body_html: str) -> None:
         "yes",
         "on",
     )
-    url = ATOMPUB_ARTICLE_TMPL.format(blog_name=blog_name)
+    url = _atompub_collection_post_url(blog_name)
     payload = _build_atom_entry_xml(title, body_html, draft=draft)
     headers = {"Content-Type": "application/atom+xml;type=entry"}
     logger.info("Livedoor AtomPub 投稿: %s", url)

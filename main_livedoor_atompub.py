@@ -1,10 +1,17 @@
 """
 ライブドアブログへ AtomPub API で1件投稿するスタンドアロンスクリプト。
 
-既定: Supabase（trn_dmm_items）から未投稿1件を取得し、main.py と同じ要領で HTML を組み立てて投稿する。
+既定: Supabase（trn_dmm_items）から、trn_dmm_item_blog_post_status（blog_key は mst_blog_accounts）で
+未投稿の1件を取得し、HTML を組み立てて AtomPub で投稿する。
+
+処理の順序:
+  1) config.settings.ACCOUNT_SETTINGS[--account].enabled_blog が True のときだけ続行
+     （False ならログを出して終了コード 0）
+  2) Supabase mst_blog_accounts を取得（platform=livedoor, enabled=true, account_id=--account）
+     行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
+  3) livedoor.blogcms.jp へ AtomPub POST
 
 .env:
-  LIVEDOOR_ID, LIVEDOOR_ATOMPUB_PASSWORD, LIVEDOOR_BLOG_NAME
   SUPABASE_URL_{ACCOUNT}, SUPABASE_KEY_{ACCOUNT}（ACCOUNT は既定 1 → _1）
   LIVEDOOR_ARTICLE_STYLE=popular …長文レビュー風 HTML（simple で従来どおり）
 
@@ -27,7 +34,7 @@ from __future__ import annotations
 # True のとき、Supabase も CLI の --manual も使わず、次の定数だけで AtomPub 投稿する。
 # 運用コミット時は必ず False に戻すこと。
 # ---------------------------------------------------------------------------
-MANUAL_DEBUG_FROM_SOURCE = True
+MANUAL_DEBUG_FROM_SOURCE = False
 DEBUG_MANUAL_TITLE = "ソース内デバッグタイトル"
 DEBUG_MANUAL_BODY_HTML = """<p>ここに HTML 本文を直接書けます。</p>
 <p>CDATA 内に入るため、本文に <code>]]&gt;</code> 連続は避けてください。</p>"""
@@ -40,6 +47,10 @@ import sys
 from dotenv import load_dotenv
 
 from config.settings import ACCOUNT_SETTINGS
+from db.blog_repository import (
+    apply_livedoor_env_from_config,
+    get_enabled_livedoor_blog_config,
+)
 from db.post_repository import get_next_post, mark_post_as_posted
 from livedoor_blog.post import (
     build_livedoor_blog_html,
@@ -66,16 +77,6 @@ def build_twitter_text(
     if campaign_text:
         parts.append(campaign_text)
     return "\n\n".join(parts)
-
-
-def _require_env(names: tuple[str, ...]) -> None:
-    missing = [n for n in names if not os.environ.get(n, "").strip()]
-    if missing:
-        print(
-            "次の環境変数（または .env）が必要です: " + ", ".join(missing),
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
 
 def _dry_run() -> bool:
@@ -136,18 +137,43 @@ def main() -> None:
     parser.add_argument(
         "--no-mark-posted",
         action="store_true",
-        help="投稿成功後も Supabase の is_posted を立てない（検証用）",
+        help="投稿成功後も Supabase のブログ投稿済み（trn_dmm_item_blog_post_status）を立てない（検証用）",
     )
     args = parser.parse_args()
 
-    os.environ["LIVEDOOR_BLOG_ENABLED"] = "1"
-    os.environ["LIVEDOOR_POST_METHOD"] = "atompub"
+    # 1) settings.py: ブログジョブ対象アカウントのみ続行
+    acc_cfg = ACCOUNT_SETTINGS.get(args.account, {})
+    if not acc_cfg.get("enabled_blog"):
+        logger.info(
+            "account=%s は ACCOUNT_SETTINGS.enabled_blog=False のため終了します（投稿しません）",
+            args.account,
+        )
+        sys.exit(0)
+
     if args.draft:
         os.environ["LIVEDOOR_ATOMPUB_DRAFT"] = "1"
 
-    _require_env(
-        ("LIVEDOOR_ID", "LIVEDOOR_ATOMPUB_PASSWORD", "LIVEDOOR_BLOG_NAME"),
+    # 2) mst_blog_accounts（ライブドア有効行）必須
+    ld_cfg = get_enabled_livedoor_blog_config(args.account)
+    if not ld_cfg:
+        logger.error(
+            "mst_blog_accounts から livedoor 行を取得できませんでした。"
+            " account_id=%s, platform=livedoor, enabled=true の行と、"
+            "blog_id / username / api_password を確認してください。"
+            " テーブル未作成の場合は db/DDL/ddl_mst_blog_accounts.sql を Supabase で実行してください。",
+            args.account,
+        )
+        sys.exit(1)
+
+    apply_livedoor_env_from_config(ld_cfg)
+    blog_key_for_status = ld_cfg["blog_key"]
+    logger.info(
+        "mst_blog_accounts 取得済み（blog_key=%s）→ AtomPub 投稿へ",
+        blog_key_for_status,
     )
+
+    os.environ["LIVEDOOR_BLOG_ENABLED"] = "1"
+    os.environ["LIVEDOOR_POST_METHOD"] = "atompub"
 
     manual_from_source = False
     if MANUAL_DEBUG_FROM_SOURCE:
@@ -181,7 +207,12 @@ def main() -> None:
             parser.error(
                 "Supabase から取得するには --service と --floor を指定してください"
             )
-        post = get_next_post(args.service, args.floor, args.account)
+        post = get_next_post(
+            args.service,
+            args.floor,
+            args.account,
+            blog_key=blog_key_for_status,
+        )
         if not post:
             logger.error(
                 "投稿対象なし: account=%s service=%s floor=%s",
@@ -236,6 +267,7 @@ def main() -> None:
         logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:800])
         sys.exit(0)
 
+    # 3) AtomPub POST
     try:
         post_to_livedoor_blog(title, body_html)
     except Exception as e:
@@ -249,7 +281,9 @@ def main() -> None:
         and not args.no_mark_posted
     ):
         try:
-            mark_post_as_posted(item_id, args.account)
+            mark_post_as_posted(
+                item_id, args.account, blog_key=blog_key_for_status
+            )
             logger.info("Supabase 投稿済みマーク: %s", item_id)
         except Exception as e:
             logger.exception("投稿済みマークに失敗しました（ブログは投稿済み）: %s", e)
@@ -262,7 +296,7 @@ if __name__ == "__main__":
     # ターミナルに渡さず、ここに argparse と同じ並びで書く（空 [] なら通常の sys.argv）
     # 例: ["--account", "1", "--service", "ebook", "--floor", "comic", "--draft"]
     # 例: ["--manual", "タイトル", "--body", "<p>HTML</p>"]
-    _argv_override: list[str] = ["--account", "2", "--service", "digital", "--floor", "videoa", "--draft"]
+    _argv_override: list[str] = ["--account", "2", "--service", "ebook", "--floor", "photo", "--draft"]
     if _argv_override:
         sys.argv = [sys.argv[0]] + _argv_override
     main()
