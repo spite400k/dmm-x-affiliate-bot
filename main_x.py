@@ -1,5 +1,4 @@
 import logging
-import os
 import random
 import time
 
@@ -8,12 +7,6 @@ from db.post_repository import (
     get_next_post,
     mark_post_as_posted,
     mark_post_failed_skip_queue,
-)
-from livedoor_blog.post import (
-    build_livedoor_blog_html,
-    is_livedoor_blog_enabled,
-    livedoor_blog_ready,
-    post_to_livedoor_blog,
 )
 from twitter_api.tweet_service import format_campaigns, post_full_twitter
 from utils.logger import setup_logger
@@ -173,7 +166,6 @@ def main() -> None:
             item_id,
         )
 
-        mark_ok = False
         try:
             mark_post_as_posted(item_id, account_id)
             logger.info(
@@ -181,60 +173,12 @@ def main() -> None:
                 config.get("screen_name", account_id),
                 item_id,
             )
-            mark_ok = True
         except Exception as e:
             logger.error(
                 "🚨 投稿済みマーク失敗: %s (%s)",
                 config.get("screen_name", account_id),
                 e,
             )
-
-        dry = os.environ.get("DRY_RUN", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-        if mark_ok and is_livedoor_blog_enabled():
-            if not livedoor_blog_ready():
-                logger.warning(
-                    "⚠ Livedoorブログ: 必須の環境変数が不足しているためスキップします"
-                )
-            else:
-                if site == "dmm":
-                    portal_url = (
-                        f"https://dmmportal.jp/{service}/{floor}/{content_id}"
-                    )
-                else:
-                    portal_url = f"https://fanzaportal.com/{floor}/{content_id}"
-                blog_html = build_livedoor_blog_html(
-                    title=post["title"],
-                    twitter_text=twitter_text,
-                    affiliate_url=affiliate_url,
-                    portal_url=portal_url,
-                    image_large_url=image_large_url or image_small_url,
-                    summary=summary,
-                    point=point,
-                    comment=comment,
-                )
-                if dry:
-                    logger.info(
-                        "DRY_RUN: Livedoorブログ本文（先頭800文字）: %s",
-                        blog_html[:800],
-                    )
-                else:
-                    try:
-                        post_to_livedoor_blog(post["title"], blog_html)
-                        logger.info(
-                            "✅ Livedoorブログ投稿完了: %s",
-                            config.get("screen_name", account_id),
-                        )
-                    except Exception as e:
-                        logger.exception(
-                            "🚨 Livedoorブログ投稿失敗: %s (%s)",
-                            config.get("screen_name", account_id),
-                            e,
-                        )
 
         time.sleep(SLEEP_SECONDS_AFTER_POST)
 
