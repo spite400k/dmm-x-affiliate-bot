@@ -2,10 +2,11 @@
 -- application: db/blog_repository.py（BLOG_ACCOUNT_MASTER_TABLE でテーブル名変更可）
 --
 -- platform = 'livedoor' のとき:
---   blog_id … AtomPub のパス識別子（例: https://livedoor.blogcms.jp/atompub/spite400k-dkg6rbhs なら spite400k-dkg6rbhs）
+--   blog_id … AtomPub のブログ名（POST は …/atompub/{blog_id}/article。例: blog.livedoor.jp/staff/ なら staff）
 --   username … livedoor ID（従来の LIVEDOOR_ID）
 --   api_password … AtomPub 用 API キー（従来の LIVEDOOR_ATOMPUB_PASSWORD）
---   blog_key … 任意。未指定なら livedoor:{blog_id}（trn_dmm_item_blog_post_status と一致させる）
+--   blog_key … 任意。備考用（人間可読なブログ名など）。投稿済みキーはアプリが livedoor:{blog_id} を使う
+--   blog_memo … blog_key の別名としても可（どちらかに備考を入れればログに出る）
 --   xmlrpc_url … ライブドアでは未使用（NULL でよい）
 --
 -- platform = 'fc2' のとき:

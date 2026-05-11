@@ -7,12 +7,15 @@ AtomPub（既定）:
   LIVEDOOR_BLOG_ENABLED=1
   LIVEDOOR_POST_METHOD=atompub  （省略可）
   LIVEDOOR_ID=（livedoor ID）
-  LIVEDOOR_BLOG_NAME=（AtomPub URL の /atompub/ 直後の識別子。
-    例: https://livedoor.blogcms.jp/atompub/spite400k-dkg6rbhs なら spite400k-dkg6rbhs）
-  LIVEDOOR_ATOMPUB_PASSWORD=（管理画面 ブログ設定 > その他 > API Key の AtomPub用パスワード）
+  LIVEDOOR_BLOG_NAME=（AtomPub のブログ名。/atompub/ と /article の間。
+    例: https://livedoor.blogcms.jp/atompub/staff/article なら staff）
+  LIVEDOOR_ATOMPUB_PASSWORD=（管理画面 ブログ設定 > その他 > API Key の AtomPub用パスワード。
+    ログインパスワードではない点に注意）
+  LIVEDOOR_ATOMPUB_BASIC_USER=（任意。Basic 認証のユーザー名。省略時は LIVEDOOR_ID。
+    401 のときは blog_id と同じ値を試す例あり）
   LIVEDOOR_ATOMPUB_COLLECTION_TMPL=（任意。POST 先 URL。{blog_name} を置換。
-    省略時は https://livedoor.blogcms.jp/atompub/{blog_name} 。
-    旧形式が必要なら …/atompub/{blog_name}/article を指定）
+    省略時は https://livedoor.blogcms.jp/atompub/{blog_name}/article（記事コレクション）。
+    レガシー等で末尾なしのみ有効な場合は …/atompub/{blog_name} を明示指定）
 
 Playwright:
   LIVEDOOR_POST_METHOD=playwright
@@ -38,8 +41,8 @@ import requests
 logger = logging.getLogger(__name__)
 
 LIVEDOOR_LOGIN_URL = "https://livedoor.blogcms.jp/member/"
-# 記事エントリの POST 先（現行 blogcms は末尾に /article を付けない形式が多い）
-_DEFAULT_ATOMPUB_COLLECTION_TMPL = "https://livedoor.blogcms.jp/atompub/{blog_name}"
+# 記事コレクション POST 先（公式: …/atompub/{blog_name}/article）。末尾なしは 400 Unknown endpoint になる
+_DEFAULT_ATOMPUB_COLLECTION_TMPL = "https://livedoor.blogcms.jp/atompub/{blog_name}/article"
 
 _DEFAULT_TITLE_SELECTORS = (
     'input[name="article[title]"]',
@@ -254,7 +257,8 @@ def _build_atom_entry_xml(title: str, body_html: str, draft: bool) -> bytes:
 
 def _post_atompub(title: str, body_html: str) -> None:
     blog_name = os.environ["LIVEDOOR_BLOG_NAME"].strip()
-    user = os.environ["LIVEDOOR_ID"].strip()
+    livedoor_id = os.environ["LIVEDOOR_ID"].strip()
+    basic_user = os.environ.get("LIVEDOOR_ATOMPUB_BASIC_USER", "").strip() or livedoor_id
     api_key = os.environ["LIVEDOOR_ATOMPUB_PASSWORD"].strip()
     draft = os.environ.get("LIVEDOOR_ATOMPUB_DRAFT", "").strip().lower() in (
         "1",
@@ -270,11 +274,19 @@ def _post_atompub(title: str, body_html: str) -> None:
         url,
         data=payload,
         headers=headers,
-        auth=(user, api_key),
+        auth=(basic_user, api_key),
         timeout=120,
     )
     if not r.ok:
         logger.error("Livedoor AtomPub 応答: %s %s", r.status_code, r.text[:2000])
+        if r.status_code == 401:
+            logger.error(
+                "AtomPub 401: パスワードは「ブログ設定 > その他 > API Key」の "
+                "AtomPub用パスワード（ログイン用パスワードではない）か確認してください。"
+                "ユーザー名は公式ではライブドアIDです。401 が続く場合は "
+                "LIVEDOOR_ATOMPUB_BASIC_USER に blog_id（例: %s）を設定して試してください。",
+                blog_name,
+            )
     r.raise_for_status()
 
 

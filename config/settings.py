@@ -1,6 +1,6 @@
 import os
 
-# ライブドア等で Supabase の trn_dmm_item_blog_post_status.blog_key と一致させる
+# 互換用（main_livedoor_atompub は mst_blog_accounts の blog_id から livedoor:{blog_id} を使う）
 LIVEDOOR_BLOG_POST_KEY = (
     os.environ.get("LIVEDOOR_BLOG_POST_KEY", "livedoor:写真集のおすすめ").strip()
     or "livedoor:写真集のおすすめ"
@@ -9,7 +9,7 @@ LIVEDOOR_BLOG_POST_KEY = (
 ACCOUNT_SETTINGS = {
     "1": {
         "enabled": False,
-        "enabled_blog": False,
+        "enabled_blog": True,
         "site":"dmm",
         "screen_name": "yuki23675786",
         "targets": [
@@ -21,7 +21,7 @@ ACCOUNT_SETTINGS = {
     },
     "2": {
         "enabled": True,
-        "enabled_blog": True,
+        "enabled_blog": False,
         "site":"fanza",
         "screen_name": "Ren47291",
         "targets": [

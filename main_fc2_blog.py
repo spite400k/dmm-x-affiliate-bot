@@ -15,7 +15,8 @@ FC2 の行は platform='fc2', enabled=true にする。
 db/blog_repository を参照。main.py はブログ投稿を行わない）。
 
 blog_key は trn_dmm_item_blog_post_status.blog_key と一致する投稿済み管理キー。
-未指定時は fc2:{account_id}:{blog_id}（FC2）／ livedoor:{blog_id}（ライブドア）を自動生成する。
+FC2: マスタの blog_key 列があればそれを使い、無ければ fc2:{account_id}:{blog_id}。
+ライブドア: マスタの blog_key は備考のみ。投稿済みキーは常に livedoor:{blog_id}。
 
 任意:
   BLOG_ACCOUNT_MASTER_TABLE … マスタテーブル名（省略時 mst_blog_accounts）

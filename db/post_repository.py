@@ -10,7 +10,8 @@ def get_next_post(service: str, floor: str, account_id: str, blog_key: str | Non
     """未投稿の作品を1件返す。
 
     blog_key 省略時: trn_dmm_items.is_posted（従来、X / FC2 キュー用）。
-    blog_key 指定時: trn_dmm_item_blog_post_status でそのブログの投稿済みを判定。
+    blog_key 指定時: trn_dmm_item_blog_post_status でそのブログの投稿済みを判定
+    （ライブドアは livedoor:{blog_id} を渡す想定）。
     """
     supabase = init_supabase(account_id)
     if blog_key is None:

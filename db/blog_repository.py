@@ -36,6 +36,7 @@ def _get_enabled_blog_row(account_id: str, platform: str) -> dict[str, Any] | No
     テーブル未作成（PGRST205）のときは None を返す（呼び出し側でエラー終了など）。
     """
     try:
+        logger.info(f"account_id: {account_id}, platform: {platform}")
         supabase = init_supabase(account_id)
         res = (
             supabase.table(_table_name())
@@ -96,8 +97,12 @@ def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
     """ライブドア AtomPub 用の接続情報をマスタから取得する。
 
     platform = 'livedoor', enabled = true の行を参照する。
-    blog_id は AtomPub URL の /atompub/ 直後の識別子（例: spite400k-dkg6rbhs）。
-    blog_key 未指定時は livedoor:{blog_id}（投稿済み管理用）。
+    blog_id は AtomPub のブログ名（/atompub/ と /article の間。例: …/atompub/staff/article なら staff）。
+
+    trn_dmm_item_blog_post_status 用のキーは常に livedoor:{blog_id}（マスタの blog_key 列は参照しない）。
+    blog_memo / blog_key / post_key 列は備考（人間可読なブログ名など）のみ。ログ用。
+
+    任意カラム atompub_basic_username: Basic 認証ユーザー名（401 時に blog_id と同じにする等）。
     """
     row = _get_enabled_blog_row(account_id, "livedoor")
     if not row:
@@ -109,15 +114,21 @@ def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
     if not blog_id or not username or not password:
         return None
 
-    blog_key = _pick(row, "blog_key", "post_key") or f"livedoor:{blog_id}"
+    status_blog_key = f"livedoor:{blog_id}"
+    blog_memo = _pick(row, "blog_memo", "blog_key", "post_key")
     xmlrpc_url = _pick(row, "xmlrpc_url", "api_url")
-    return {
+    basic_user = _pick(row, "atompub_basic_username", "basic_auth_username")
+    out: dict[str, str] = {
         "blog_id": blog_id,
         "username": username,
         "api_password": password,
-        "blog_key": blog_key,
+        "blog_key": status_blog_key,
+        "blog_memo": blog_memo,
         "xmlrpc_url": xmlrpc_url,
     }
+    if basic_user:
+        out["atompub_basic_username"] = basic_user
+    return out
 
 
 def apply_livedoor_env_from_config(cfg: dict[str, str]) -> None:
@@ -125,3 +136,8 @@ def apply_livedoor_env_from_config(cfg: dict[str, str]) -> None:
     os.environ["LIVEDOOR_ID"] = cfg["username"]
     os.environ["LIVEDOOR_ATOMPUB_PASSWORD"] = cfg["api_password"]
     os.environ["LIVEDOOR_BLOG_NAME"] = cfg["blog_id"]
+    bu = str(cfg.get("atompub_basic_username") or "").strip()
+    if bu:
+        os.environ["LIVEDOOR_ATOMPUB_BASIC_USER"] = bu
+    else:
+        os.environ.pop("LIVEDOOR_ATOMPUB_BASIC_USER", None)

@@ -1,7 +1,7 @@
 """
 ライブドアブログへ AtomPub API で1件投稿するスタンドアロンスクリプト。
 
-既定: Supabase（trn_dmm_items）から、trn_dmm_item_blog_post_status（blog_key は mst_blog_accounts）で
+既定: Supabase（trn_dmm_items）から、trn_dmm_item_blog_post_status（blog_key は livedoor:{blog_id} 固定）で
 未投稿の1件を取得し、HTML を組み立てて AtomPub で投稿する。
 
 処理の順序:
@@ -110,7 +110,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--account",
-        default="2",
+        default="1",
         help="Supabase 接続に使うアカウント番号（SUPABASE_URL_1 等）。既定: 1",
     )
     parser.add_argument(
@@ -140,6 +140,7 @@ def main() -> None:
         help="投稿成功後も Supabase のブログ投稿済み（trn_dmm_item_blog_post_status）を立てない（検証用）",
     )
     args = parser.parse_args()
+    logger.info(f"args: {args}")
 
     # 1) settings.py: ブログジョブ対象アカウントのみ続行
     acc_cfg = ACCOUNT_SETTINGS.get(args.account, {})
@@ -154,6 +155,7 @@ def main() -> None:
         os.environ["LIVEDOOR_ATOMPUB_DRAFT"] = "1"
 
     # 2) mst_blog_accounts（ライブドア有効行）必須
+    logger.info(f"args.account: {args.account}")
     ld_cfg = get_enabled_livedoor_blog_config(args.account)
     if not ld_cfg:
         logger.error(
@@ -167,10 +169,20 @@ def main() -> None:
 
     apply_livedoor_env_from_config(ld_cfg)
     blog_key_for_status = ld_cfg["blog_key"]
-    logger.info(
-        "mst_blog_accounts 取得済み（blog_key=%s）→ AtomPub 投稿へ",
-        blog_key_for_status,
-    )
+    blog_memo = str(ld_cfg.get("blog_memo") or "").strip()
+    if blog_memo:
+        logger.info(
+            "mst_blog_accounts 取得済み（blog_id=%s, 投稿済みキー=%s, 備考=%s）→ AtomPub 投稿へ",
+            ld_cfg["blog_id"],
+            blog_key_for_status,
+            blog_memo,
+        )
+    else:
+        logger.info(
+            "mst_blog_accounts 取得済み（blog_id=%s, 投稿済みキー=%s）→ AtomPub 投稿へ",
+            ld_cfg["blog_id"],
+            blog_key_for_status,
+        )
 
     os.environ["LIVEDOOR_BLOG_ENABLED"] = "1"
     os.environ["LIVEDOOR_POST_METHOD"] = "atompub"
@@ -296,7 +308,8 @@ if __name__ == "__main__":
     # ターミナルに渡さず、ここに argparse と同じ並びで書く（空 [] なら通常の sys.argv）
     # 例: ["--account", "1", "--service", "ebook", "--floor", "comic", "--draft"]
     # 例: ["--manual", "タイトル", "--body", "<p>HTML</p>"]
-    _argv_override: list[str] = ["--account", "2", "--service", "ebook", "--floor", "photo", "--draft"]
+    # _argv_override: list[str] = ["--account", "1", "--service", "ebook", "--floor", "photo", "--draft"]
+    _argv_override: list[str] = ["--account", "1", "--service", "ebook", "--floor", "photo", "--draft"]
     if _argv_override:
         sys.argv = [sys.argv[0]] + _argv_override
     main()
