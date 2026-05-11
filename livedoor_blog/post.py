@@ -581,15 +581,16 @@ def _editorial_oshi_points_fragments(
     rcn: int,
     rav: float | None,
 ) -> tuple[str, list[str]]:
-    """推し欄: h2 文言と <h3>/<p> フラグメント。候補プールから作品シードで順序・見出しを変える。"""
+    """推し欄: h2・1行リード・箇条書き（strong ラベル＋本文）。候補プール＋シードで順と件数を変える。"""
     esc = html_module.escape
     seed = _oshi_content_seed(item)
     digest = digest_raw or ""
-    logger.info(f"digest: {digest}")
 
     h2_options = (
         "ここが推しポイント！",
         "先に押さえたい見どころ",
+        "制作のキモになるポイント",
+        "手応えが伝わりやすいツボ",
     )
     h2_text = h2_options[seed % len(h2_options)]
 
@@ -616,7 +617,7 @@ def _editorial_oshi_points_fragments(
             "見どころの振れ幅を存分に楽しめます。"
         )
 
-    # (h3, 本文プレーン, 並べ替え用の種別キー)
+    # (箇条書きラベル, 本文プレーン, 並べ替え用の種別キー)
     pool: list[tuple[str, str, int]] = []
 
     d_heads = ("圧倒的な密度", "カットの濃さとテンポ", "構成のメリハリ")
@@ -732,24 +733,42 @@ def _editorial_oshi_points_fragments(
             )
         )
 
-    want_pairs = 3 + (seed % 2)
+    want_n = 3 + (seed % 2)
     keyed: list[tuple[int, str, str, int]] = []
-    for h3, body, bk in pool:
+    for label, body, bk in pool:
         rank = ((seed * 31) ^ (bk * 17)) & 0x7FFFFFFF
         rank %= 10000
-        keyed.append((rank, h3, body, bk))
+        keyed.append((rank, label, body, bk))
     keyed.sort(key=lambda x: x[0])
 
-    seen_h3: set[str] = set()
-    lines: list[str] = []
-    for _, h3, body, _ in keyed:
-        if h3 in seen_h3:
+    seen_labels: set[str] = set()
+    selected: list[tuple[str, str]] = []
+    for _, label, body, _ in keyed:
+        if label in seen_labels:
             continue
-        seen_h3.add(h3)
-        lines.append(f"<h3>{esc(h3)}</h3>")
-        lines.append(f"<p>{esc(body)}</p>")
-        if len(lines) >= want_pairs * 2:
+        seen_labels.add(label)
+        selected.append((label, body))
+        if len(selected) >= want_n:
             break
+
+    lead_options = (
+        "購入前に押さえたい観点を、見出しの階層を浅くして拾い読みしやすく整理しています。",
+        "迷いやすいポイントを、ラベルと一文で並べています。",
+    )
+    lead = lead_options[(seed // 5) % len(lead_options)]
+
+    iw = "\u3000"
+    lines: list[str] = [
+        '<p style="margin:0.6rem 0 0.75rem;line-height:1.75;font-size:96%;color:#333;">'
+        + esc(lead)
+        + "</p>",
+        '<ul style="margin:0 0 1.1rem;padding-left:1.2rem;line-height:1.75;">',
+    ]
+    for label, body in selected:
+        lines.append(
+            f'<li style="margin:0.4rem 0;"><strong>{esc(label)}</strong>{iw}{esc(body)}</li>'
+        )
+    lines.append("</ul>")
 
     return h2_text, lines
 
@@ -762,7 +781,7 @@ def _editorial_article_sections_html(
     *,
     article_headline: str | None = None,
 ) -> str:
-    """編集ブロック。冒頭の魅力のあと、推しポイント → 読者の反応 → デジタル版の強み → おすすめ層の順。"""
+    """編集ブロック。冒頭の魅力のあと、推し（リード＋箇条書き）→ 読者の反応 → デジタル版の強み → おすすめ層の順。"""
     if not item:
         return ""
     esc = html_module.escape
@@ -820,7 +839,7 @@ def _editorial_article_sections_html(
     )
     parts.append("<p>" + esc(fan_line) + "</p>")
 
-    # ① 推しポイント（候補プール＋作品シードで見出し・順・本数を変える）
+    # ① 推しポイント（h2＋リード p＋ ul/li・strong ラベル。プール＋シードで順と件数を変える）
     oshi_h2, oshi_frags = _editorial_oshi_points_fragments(
         item, genres, digest_raw, maker, name_phrase, rcn, rav
     )
