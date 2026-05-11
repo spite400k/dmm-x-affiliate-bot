@@ -2,18 +2,17 @@ name: Post to Twitter (DMM X Bot)
 
 on:
   schedule:
-  - cron: '0 11 * 1 *' # 毎日UTC11時に実行（JSTで20時に実行）に実行
-  - cron: '0 12 * 1 *' # 毎日UTC12時に実行（JSTで21時に実行）に実行
-  - cron: '0 13 * 1 *' # 毎日UTC13時に実行（JSTで22時に実行）に実行
-  - cron: '0 14 * 1 *' # 毎日UTC14時に実行（JSTで23時に実行）に実行  
-  - cron: '0 3 * 1 *' # 毎日UTC3時に実行（JSTで12時に実行）に実行
-  - cron: '0 22 * 1 *' # 毎日UTC22時実行（JSTで7時に実行）に実行
-  workflow_dispatch: # 手動実行も可
+    - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
+    - cron: '0 12 * * *' # 毎日 UTC12時（JST 21時）
+    - cron: '0 13 * * *' # 毎日 UTC13時（JST 22時）
+    - cron: '0 14 * * *' # 毎日 UTC14時（JST 23時）
+    - cron: '0 3 * * *' # 毎日 UTC3時（JST 12時）
+    - cron: '0 22 * * *' # 毎日 UTC22時（JST 翌7時）
+  workflow_dispatch:
 
 jobs:
   post-tweet:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -52,11 +51,9 @@ jobs:
           echo "ACCESS_TOKEN_SECRET_3=${{ secrets.ACCESS_TOKEN_SECRET_3 }}" >> .env
           echo "BEARER_TOKEN_3=${{ secrets.BEARER_TOKEN_3 }}" >> .env
 
-
-
       - name: Run tweet bot
         run: python main.py
-        
+
       - name: Upload debug artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -65,4 +62,4 @@ jobs:
           path: |
             debug*.html
             debug*.png
-          if-no-files-found: ignore   # ← ファイルが無いときに失敗しない
+          if-no-files-found: ignore
