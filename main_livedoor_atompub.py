@@ -2,7 +2,7 @@
 ライブドアブログへ AtomPub API で1件投稿するスタンドアロンスクリプト。
 
 既定: Supabase（trn_dmm_items）から、trn_dmm_item_blog_post_status（blog_key は livedoor:{blog_id} 固定）で
-未投稿の1件を取得し、HTML を組み立てて AtomPub で投稿する。
+未投稿の1件を取得し、dmm_ai_review_summaries（content_id 一致）があれば本文に取り込み、HTML を組み立てて AtomPub で投稿する。
 
 処理の順序:
   1) config.settings.ACCOUNT_SETTINGS[--account].enabled_blog が True のときだけ続行
@@ -51,7 +51,7 @@ from db.blog_repository import (
     apply_livedoor_env_from_config,
     get_enabled_livedoor_blog_config,
 )
-from db.post_repository import get_next_post, mark_post_as_posted
+from db.post_repository import get_ai_review_summary, get_next_post, mark_post_as_posted
 from livedoor_blog.post import (
     build_livedoor_blog_html,
     post_to_livedoor_blog,
@@ -262,6 +262,7 @@ def main() -> None:
             campaigns,
             affiliate_url,
         )
+        ai_review = get_ai_review_summary(args.account, content_id)
         body_html = build_livedoor_blog_html(
             title=title,
             twitter_text=twitter_text,
@@ -271,12 +272,14 @@ def main() -> None:
             summary=summary,
             point=point,
             comment=comment,
+            item_row=post,
+            ai_review_row=ai_review,
         )
         logger.info("Supabase 取得: %s - %s", item_id, title)
 
     dry = _dry_run()
     if dry:
-        logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:800])
+        logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:8000])
         sys.exit(0)
 
     # 3) AtomPub POST

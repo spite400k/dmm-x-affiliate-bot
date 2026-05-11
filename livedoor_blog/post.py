@@ -27,13 +27,18 @@ Playwright:
   LIVEDOOR_ARTICLE_STYLE=simple（既定）…従来のフラットな段落。
   LIVEDOOR_ARTICLE_STYLE=popular …リード・h2 見出し・ヒーロー画像・末尾の
     購入案内リストなど、読みやすい長文記事風（人気ブログの一般的な構成を参考）。
+  build_livedoor_blog_html(item_row=…) に trn_dmm_items 相当の dict を渡すと、
+    ジャンル・出演・価格・スペック表・サンプル画像・立ち読みリンクなどを本文に展開する。
+  ai_review_row=… に dmm_ai_review_summaries 相当を渡すと、レビュー要旨・AIスコア・読者像・注意点を追記する。
 """
 
 from __future__ import annotations
 
 import html as html_module
+import json
 import logging
 import os
+from typing import Any
 from xml.sax.saxutils import escape as xml_escape
 
 import requests
@@ -87,6 +92,380 @@ def livedoor_blog_ready() -> bool:
     )
 
 
+def _item_str(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_genres(genres: object) -> list[str]:
+    if genres is None:
+        return []
+    if isinstance(genres, list):
+        return [str(g).strip() for g in genres if str(g).strip()]
+    s = str(genres).strip()
+    if not s:
+        return []
+    return [x.strip() for x in s.split(",") if x.strip()]
+
+
+def _format_price_yen(n: object) -> str:
+    if n is None:
+        return ""
+    try:
+        return f"¥{int(n):,}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _review_sentence(item: dict[str, Any]) -> str:
+    rc = item.get("review_count")
+    ra = item.get("review_average")
+    try:
+        rcn = int(rc) if rc is not None else 0
+    except (TypeError, ValueError):
+        rcn = 0
+    if rcn <= 0:
+        return ""
+    if ra is not None:
+        try:
+            rav = float(ra)
+            return f"ユーザー評価の平均は {rav:.1f} 点で、レビューは {rcn} 件です。"
+        except (TypeError, ValueError):
+            pass
+    return f"レビューが {rcn} 件寄せられています。"
+
+
+def _sample_image_urls(item: dict[str, Any], *, limit: int = 6) -> list[str]:
+    urls: list[str] = []
+    raw = item.get("sample_images")
+    if isinstance(raw, list):
+        urls.extend(_item_str(u) for u in raw if _item_str(u))
+    s = _item_str(item.get("sample_images_s"))
+    if s:
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    urls.extend(_item_str(u) for u in parsed if _item_str(u))
+            except json.JSONDecodeError:
+                pass
+        else:
+            for part in s.replace("\n", ",").split(","):
+                p = part.strip()
+                if p:
+                    urls.append(p)
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:limit]
+
+
+def _narrative_paragraphs_from_item(item: dict[str, Any], title: str) -> list[str]:
+    """DB 列から読みやすい紹介文（プレーンテキスト）を数段落生成。"""
+    paragraphs: list[str] = []
+    t = title.strip()
+    genres = _normalize_genres(item.get("genres"))
+    cat = _item_str(item.get("category_name"))
+    service = _item_str(item.get("service"))
+    floor = _item_str(item.get("floor"))
+    series = _item_str(item.get("series"))
+    maker = _item_str(item.get("maker"))
+
+    clauses: list[str] = []
+    if cat:
+        clauses.append(f"カテゴリは「{cat}」")
+    if service and floor:
+        clauses.append(f"{service} の {floor} 向け配信コンテンツ")
+    if genres:
+        gtxt = "、".join(genres[:6])
+        if len(genres) > 6:
+            gtxt += " など"
+        clauses.append(f"ジャンル・タグには {gtxt} が付与されています")
+    if clauses:
+        body = "、".join(clauses)
+        if t:
+            paragraphs.append(f"『{t}』は、{body}。")
+        else:
+            paragraphs.append(f"{body}。")
+
+    credits: list[str] = []
+    for label, key in (
+        ("出演", "actress"),
+        ("監督", "director"),
+        ("著者", "author"),
+    ):
+        v = _item_str(item.get(key))
+        if v:
+            credits.append(f"{label}は {v}")
+    if maker:
+        credits.append(f"レーベル・メーカーは {maker}")
+    if series:
+        credits.append(f"シリーズは「{series}」")
+    if credits:
+        paragraphs.append("。".join(credits) + "。")
+
+    meta: list[str] = []
+    rd = _item_str(item.get("release_date"))
+    if rd:
+        meta.append(f"発売・配信開始の表記は {rd}")
+    price = _format_price_yen(item.get("price"))
+    lp = _format_price_yen(item.get("list_price"))
+    if price:
+        if lp and lp != price:
+            meta.append(f"価格は {price}（参考定価 {lp}）")
+        else:
+            meta.append(f"価格は {price}")
+    vol = _item_str(item.get("volume"))
+    if vol:
+        meta.append(f"収録ボリュームの表記は {vol}")
+    rv = _review_sentence(item)
+    if rv:
+        meta.append(rv.rstrip("。"))
+    if meta:
+        paragraphs.append("。".join(meta) + "。")
+
+    return [p for p in paragraphs if p.strip()]
+
+
+def _item_specs_rows_html(item: dict[str, Any]) -> str:
+    """主要スペックを表形式（行は値があるものだけ）。"""
+    esc = html_module.escape
+    rows: list[tuple[str, str]] = []
+    mapping: tuple[tuple[str, str], ...] = (
+        ("content_id", "コンテンツID"),
+        ("product_id", "プロダクトID"),
+        ("category_name", "カテゴリ"),
+        ("site", "サイト"),
+        ("service", "サービス"),
+        ("floor", "フロア"),
+        ("delivery", "配信形態"),
+        ("release_date", "発売・配信日"),
+        ("stock", "在庫・販売状態"),
+        ("jancode", "JANコード"),
+        ("item_url", "作品ページURL"),
+        ("sample_movie_url", "サンプル動画URL"),
+    )
+    for key, label in mapping:
+        v = _item_str(item.get(key))
+        if v:
+            rows.append((label, v))
+    genres = _normalize_genres(item.get("genres"))
+    if genres:
+        rows.append(("ジャンル", "、".join(genres)))
+    price = _format_price_yen(item.get("price"))
+    lp = _format_price_yen(item.get("list_price"))
+    if price:
+        rows.append(("価格", f"{price}" + (f"（定価 {lp}）" if lp and lp != price else "")))
+    vol = _item_str(item.get("volume"))
+    if vol:
+        rows.append(("ボリューム", vol))
+    for label, key in (
+        ("出演", "actress"),
+        ("監督", "director"),
+        ("著者", "author"),
+        ("メーカー", "maker"),
+        ("シリーズ", "series"),
+    ):
+        v = _item_str(item.get(key))
+        if v:
+            rows.append((label, v))
+    rv = _review_sentence(item)
+    if rv:
+        rows.append(("レビュー", rv.rstrip("。")))
+
+    if not rows:
+        return ""
+
+    trs = []
+    for lab, val in rows:
+        trs.append(
+            f"<tr><th scope='row'>{esc(lab)}</th><td>{esc(val)}</td></tr>"
+        )
+    return (
+        '<table class="item-specs" style="border-collapse:collapse;width:100%;'
+        'max-width:42rem;font-size:95%;">'
+        "<tbody>"
+        + "".join(trs)
+        + "</tbody></table>"
+    )
+
+
+def _sample_gallery_html(item: dict[str, Any], title: str) -> str:
+    urls = _sample_image_urls(item)
+    if not urls:
+        return ""
+    esc = html_module.escape
+    alt_base = esc(title)[:120] if title.strip() else "サンプル画像"
+    figs = []
+    for i, u in enumerate(urls):
+        figs.append(
+            f'<figure style="margin:0.5rem 0;">'
+            f'<img src="{esc(u, quote=True)}" alt="{alt_base} サンプル {i + 1}" '
+            f'loading="lazy" style="max-width:100%;height:auto;" /></figure>'
+        )
+    return (
+        '<div class="sample-gallery" style="display:grid;gap:0.75rem;">'
+        + "".join(figs)
+        + "</div>"
+    )
+
+
+def _tachiyomi_link_html(item: dict[str, Any]) -> str:
+    u = _item_str(item.get("tachiyomi_affiliate_url")) or _item_str(
+        item.get("tachiyomi_url")
+    )
+    if not u:
+        return ""
+    esc = html_module.escape
+    return (
+        f'<li><a href="{esc(u, quote=True)}" rel="nofollow sponsored">'
+        "立ち読みページ（PR）</a></li>"
+    )
+
+
+def _text_array_field(val: object) -> list[str]:
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if str(x).strip()]
+    s = str(val).strip()
+    return [s] if s else []
+
+
+def _smallint_display(val: object) -> str | None:
+    if val is None:
+        return None
+    try:
+        return str(int(val))
+    except (TypeError, ValueError):
+        return None
+
+
+def _avg_rating_display(val: object) -> str | None:
+    if val is None:
+        return None
+    try:
+        return f"{float(val):.2f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _ai_review_sections_html(row: dict[str, Any] | None) -> str:
+    """dmm_ai_review_summaries 由来（レビュー要約・スコア・読者像・注意点）。"""
+    if not row:
+        return ""
+    esc = html_module.escape
+    digest = _item_str(row.get("review_digest"))
+    summary_ai = _item_str(row.get("summary_text"))
+    readers = _text_array_field(row.get("reader_types"))
+    warnings = _text_array_field(row.get("warning_points"))
+    score_rows: list[tuple[str, str]] = []
+    for label, key in (
+        ("総合満足度", "content_score"),
+        ("感情移入", "emotion_score"),
+        ("魅力・引きつけ", "attraction_score"),
+        ("ジャンル傾向①", "genre_axis1_score"),
+        ("ジャンル傾向②", "genre_axis2_score"),
+    ):
+        disp = _smallint_display(row.get(key))
+        if disp is not None:
+            score_rows.append((label, disp))
+    rc_ai = row.get("review_count")
+    ar_ai = row.get("avg_rating")
+    meta_bits: list[str] = []
+    try:
+        if rc_ai is not None:
+            meta_bits.append(f"参照レビュー件数 {int(rc_ai)} 件")
+    except (TypeError, ValueError):
+        pass
+    ard = _avg_rating_display(ar_ai)
+    if ard:
+        meta_bits.append(f"平均評価 {ard} 点")
+
+    if not (
+        digest
+        or summary_ai
+        or score_rows
+        or readers
+        or warnings
+        or meta_bits
+    ):
+        return ""
+
+    parts: list[str] = []
+    parts.append("<h2>レビュー要約・読者向け分析（AI）</h2>")
+    if meta_bits:
+        parts.append(
+            "<p><small>"
+            + esc("（" + "、".join(meta_bits) + "）")
+            + "</small></p>"
+        )
+    if digest:
+        parts.append("<h3>レビュー要旨</h3>")
+        parts.append("<p>" + esc(digest).replace("\n", "<br />\n") + "</p>")
+    if summary_ai:
+        parts.append("<h3>あらすじ・内容の整理</h3>")
+        parts.append("<p>" + esc(summary_ai).replace("\n", "<br />\n") + "</p>")
+    if score_rows:
+        parts.append("<h3>スコア指標（参考値）</h3>")
+        trs = [
+            f"<tr><th scope='row'>{esc(lab)}</th><td>{esc(val)}</td></tr>"
+            for lab, val in score_rows
+        ]
+        parts.append(
+            '<table class="ai-review-scores" style="border-collapse:collapse;'
+            'width:100%;max-width:28rem;font-size:95%;"><tbody>'
+            + "".join(trs)
+            + "</tbody></table>"
+        )
+    if readers:
+        parts.append("<h3>向いている読者像</h3>")
+        parts.append("<ul>")
+        for r in readers:
+            parts.append(f"<li>{esc(r)}</li>")
+        parts.append("</ul>")
+    return "\n".join(parts)
+
+
+def _item_rich_sections_html(item: dict[str, Any] | None, title: str) -> str:
+    """trn_dmm_items 由来の追記ブロック（ナラティブ・スペック表・サンプル画像）。"""
+    if not item:
+        return ""
+    esc = html_module.escape
+    parts: list[str] = []
+    paras = _narrative_paragraphs_from_item(item, title)
+    if paras:
+        parts.append("<h2>作品紹介</h2>")
+        for p in paras:
+            parts.append("<p>" + esc(p).replace("\n", "<br />\n") + "</p>")
+    specs = _item_specs_rows_html(item)
+    if specs:
+        parts.append("<h2>作品データ・スペック</h2>")
+        parts.append(specs)
+    gallery = _sample_gallery_html(item, title)
+    if gallery:
+        parts.append("<h2>サンプル画像</h2>")
+        parts.append(gallery)
+    return "\n".join(parts)
+
+
+def _merged_rich_sections_html(
+    item_row: dict[str, Any] | None,
+    ai_review_row: dict[str, Any] | None,
+    title: str,
+) -> str:
+    """trn_dmm_items と dmm_ai_review_summaries を連結した追記ブロック。"""
+    chunks = [
+        _item_rich_sections_html(item_row, title),
+        _ai_review_sections_html(ai_review_row),
+    ]
+    return "\n".join(c for c in chunks if c)
+
+
 def _article_style(article_style: str | None) -> str:
     raw = (
         article_style
@@ -103,6 +482,8 @@ def _build_simple_livedoor_html(
     affiliate_url: str,
     portal_url: str,
     image_large_url: str,
+    item_row: dict[str, Any] | None,
+    ai_review_row: dict[str, Any] | None,
 ) -> str:
     parts: list[str] = []
     parts.append(f"<h1>{html_module.escape(title)}</h1>")
@@ -115,6 +496,9 @@ def _build_simple_livedoor_html(
             continue
         inner = html_module.escape(p).replace("\n", "<br />\n")
         parts.append(f"<p>{inner}</p>")
+    rich = _merged_rich_sections_html(item_row, ai_review_row, title)
+    if rich:
+        parts.append(rich)
     if portal_url.strip():
         u = html_module.escape(portal_url.strip(), quote=True)
         parts.append(
@@ -124,6 +508,14 @@ def _build_simple_livedoor_html(
         u = html_module.escape(affiliate_url.strip(), quote=True)
         parts.append(
             f'<p><a href="{u}" rel="nofollow sponsored">公式サイト・購入はこちら（PR）</a></p>'
+        )
+    tu = _item_str(item_row.get("tachiyomi_affiliate_url")) if item_row else ""
+    if not tu and item_row:
+        tu = _item_str(item_row.get("tachiyomi_url"))
+    if tu:
+        u = html_module.escape(tu, quote=True)
+        parts.append(
+            f'<p><a href="{u}" rel="nofollow sponsored">立ち読みはこちら（PR）</a></p>'
         )
     return "\n".join(parts)
 
@@ -138,6 +530,8 @@ def _build_popular_livedoor_html(
     summary: str,
     point: str,
     comment: str,
+    item_row: dict[str, Any] | None,
+    ai_review_row: dict[str, Any] | None,
 ) -> str:
     """長文レビュー風＋末尾に公式誘導ブロック（PR）。"""
     esc = html_module.escape
@@ -163,6 +557,9 @@ def _build_popular_livedoor_html(
     if point.strip():
         parts.append("<h2>注目ポイント・推しどころ</h2>")
         parts.append("<p>" + esc(point.strip()).replace("\n", "<br />\n") + "</p>")
+    rich = _merged_rich_sections_html(item_row, ai_review_row, title)
+    if rich:
+        parts.append(rich)
     seen: set[str] = {title.strip()}
     if lead:
         seen.add(lead)
@@ -170,12 +567,23 @@ def _build_popular_livedoor_html(
         seen.add(summary.strip())
     if point.strip():
         seen.add(point.strip())
+    if item_row:
+        for np in _narrative_paragraphs_from_item(item_row, title):
+            seen.add(np)
+    if ai_review_row:
+        ad = _item_str(ai_review_row.get("review_digest"))
+        if ad:
+            seen.add(ad)
+        ast = _item_str(ai_review_row.get("summary_text"))
+        if ast:
+            seen.add(ast)
     extra = [b for b in blocks if b not in seen]
     if extra:
         parts.append("<h2>作品紹介・お得情報</h2>")
         for b in extra:
             parts.append("<p>" + esc(b).replace("\n", "<br />\n") + "</p>")
-    if portal_url.strip() or affiliate_url.strip():
+    tachi_li = _tachiyomi_link_html(item_row) if item_row else ""
+    if portal_url.strip() or affiliate_url.strip() or tachi_li:
         parts.append("<h2>詳細・購入のご案内（PR）</h2>")
         parts.append("<ul>")
         if portal_url.strip():
@@ -190,6 +598,8 @@ def _build_popular_livedoor_html(
                 f'<li><a href="{u}" rel="nofollow sponsored">'
                 "公式ページの詳細・購入はこちら</a></li>"
             )
+        if tachi_li:
+            parts.append(tachi_li)
         parts.append("</ul>")
     parts.append(
         "<p><small>※本記事には広告・アフィリエイト（PR）リンクが含まれる場合があります。"
@@ -210,7 +620,10 @@ def build_livedoor_blog_html(
     point: str = "",
     comment: str = "",
     article_style: str | None = None,
+    item_row: dict[str, Any] | None = None,
+    ai_review_row: dict[str, Any] | None = None,
 ) -> str:
+    """item_row / ai_review_row に DB 行を渡すと、作品スペックと AI レビュー要約を本文に展開する。"""
     style = _article_style(article_style)
     if style == "popular":
         return _build_popular_livedoor_html(
@@ -222,6 +635,8 @@ def build_livedoor_blog_html(
             summary=summary,
             point=point,
             comment=comment,
+            item_row=item_row,
+            ai_review_row=ai_review_row,
         )
     return _build_simple_livedoor_html(
         title=title,
@@ -229,6 +644,8 @@ def build_livedoor_blog_html(
         affiliate_url=affiliate_url,
         portal_url=portal_url,
         image_large_url=image_large_url,
+        item_row=item_row,
+        ai_review_row=ai_review_row,
     )
 
 

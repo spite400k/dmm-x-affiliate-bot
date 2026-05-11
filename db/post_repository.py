@@ -1,9 +1,41 @@
 from datetime import datetime, timezone
+from typing import Any
 
 from db.supabase_client import init_supabase
 
 _BATCH = 50
 _STATUS_TABLE = "trn_dmm_item_blog_post_status"
+_AI_REVIEW_TABLE = "dmm_ai_review_summaries"
+
+
+def _is_missing_table_error(exc: BaseException) -> bool:
+    if type(exc).__name__ == "APIError" and exc.args and isinstance(exc.args[0], dict):
+        return exc.args[0].get("code") == "PGRST205"
+    text = str(exc)
+    return "PGRST205" in text or "Could not find the table" in text
+
+
+def get_ai_review_summary(account_id: str, content_id: str) -> dict[str, Any] | None:
+    """content_id に対応する dmm_ai_review_summaries を1件返す。行が無い・テーブル無しは None。"""
+    cid = (content_id or "").strip()
+    if not cid:
+        return None
+    supabase = init_supabase(account_id)
+    try:
+        res = (
+            supabase.table(_AI_REVIEW_TABLE)
+            .select("*")
+            .eq("content_id", cid)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        if _is_missing_table_error(e):
+            return None
+        raise
+    if not res.data:
+        return None
+    return res.data[0]
 
 
 def get_next_post(service: str, floor: str, account_id: str, blog_key: str | None = None):
