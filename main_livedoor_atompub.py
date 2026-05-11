@@ -46,6 +46,8 @@ import sys
 
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from config.settings import ACCOUNT_SETTINGS
 from db.blog_repository import (
     apply_livedoor_env_from_config,
@@ -90,7 +92,6 @@ def _dry_run() -> bool:
 
 
 def main() -> None:
-    load_dotenv()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
