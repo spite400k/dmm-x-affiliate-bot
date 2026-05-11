@@ -3,13 +3,13 @@ Buzz 用エントリ: Supabase trn_posts / trn_post_replies と X API v2 で
 予約投稿 → 記事URLリプライ（5分後）を処理する。
 cron で定期実行することを想定（例: 1分ごと）。
 
-config.settings.ACCOUNT_SETTINGS を参照し、enabled なアカウントを順に処理する。
+config.x_settings.X_ACCOUNT_SETTINGS を参照し、enabled なアカウントを順に処理する。
 
 環境変数（アカウント番号 N は各エントリのキーに対応）:
   SUPABASE_URL_N, SUPABASE_KEY_N
   API_KEY_N, API_SECRET_KEY_N, ACCESS_TOKEN_N, ACCESS_TOKEN_SECRET_N, BEARER_TOKEN_N
   ARTICLE_BASE_URL … 記事URLのベース（全アカウント共通の既定）。
-    個別に上書きする場合は ACCOUNT_SETTINGS の各要素に article_base_url を追加。
+    個別に上書きする場合は X_ACCOUNT_SETTINGS の各要素に article_base_url を追加。
 
 リプライ文は {article_base}/{article_id}
 """
@@ -24,7 +24,7 @@ from typing import Any, Callable, TypeVar
 
 from dotenv import load_dotenv
 
-from config.settings import ACCOUNT_SETTINGS
+from config.x_settings import X_ACCOUNT_SETTINGS
 from db.supabase_client import init_supabase
 from twitter_api.twitter_client import get_clients
 from twitter_api.tweet_service import fetch_image_buffer_from_url, safe_post_tweet, upload_images_v1
@@ -340,8 +340,8 @@ def process_due_replies(account_id: str) -> None:
 # メイン処理
 # ---------------------
 def main() -> None:
-    logger.info("Buzz affiliate ジョブ開始（ACCOUNT_SETTINGS 走査）")
-    for account_id, config in ACCOUNT_SETTINGS.items():
+    logger.info("Buzz affiliate ジョブ開始（X_ACCOUNT_SETTINGS 走査）")
+    for account_id, config in X_ACCOUNT_SETTINGS.items():
         if not config.get("enabled"):
             logger.info(
                 "⚠️ %s は実施フラグOFFのためスキップ",

@@ -1,7 +1,7 @@
 """
 FC2ブログへ XML-RPC（metaWeblog.newPost）で自動投稿するエントリポイント。
 
-main.py と同様に config.settings.ACCOUNT_SETTINGS と DB キュー（get_next_post）を利用する。
+main.py と同様に config.blog_settings.BLOG_ACCOUNT_SETTINGS と DB キュー（get_next_post）を利用する。
 FC2 のブログID・ユーザー名・XML-RPCパスワードは Supabase のマスタテーブルから取得する。
 
 既定マスタテーブル: mst_blog_accounts
@@ -35,7 +35,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from config.settings import ACCOUNT_SETTINGS
+from config.blog_settings import BLOG_ACCOUNT_SETTINGS
 from db.blog_repository import get_enabled_fc2_blog_config
 from db.post_repository import (
     get_next_post,
@@ -142,10 +142,10 @@ def _exclude_item_after_post_failure(
 def main() -> None:
     dry = os.getenv("DRY_RUN", "").strip() in ("1", "true", "True", "yes", "YES")
 
-    for account_id, config in ACCOUNT_SETTINGS.items():
-        if not config.get("enabled_blog"):
+    for account_id, config in BLOG_ACCOUNT_SETTINGS.items():
+        if not config.get("enabled"):
             logger.info(
-                "%s は enabled_blog=OFF のためスキップします",
+                "%s は BLOG_ACCOUNT_SETTINGS.enabled=OFF のためスキップします",
                 config.get("screen_name", account_id),
             )
             continue

@@ -5,7 +5,7 @@
 未投稿の1件を取得し、dmm_ai_review_summaries（content_id 一致）があれば本文に取り込み、HTML を組み立てて AtomPub で投稿する。
 
 処理の順序:
-  1) config.settings.ACCOUNT_SETTINGS[--account].enabled_blog が True のときだけ続行
+  1) config.blog_settings.BLOG_ACCOUNT_SETTINGS[--account].enabled が True のときだけ続行
      （False ならログを出して終了コード 0）
   2) Supabase mst_blog_accounts を取得（platform=livedoor, enabled=true, account_id=--account）
      行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
@@ -48,7 +48,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from config.settings import ACCOUNT_SETTINGS
+from config.blog_settings import BLOG_ACCOUNT_SETTINGS
 from db.blog_repository import (
     apply_livedoor_env_from_config,
     get_enabled_livedoor_blog_config,
@@ -144,11 +144,11 @@ def main() -> None:
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
-    # 1) settings.py: ブログジョブ対象アカウントのみ続行
-    acc_cfg = ACCOUNT_SETTINGS.get(args.account, {})
-    if not acc_cfg.get("enabled_blog"):
+    # 1) blog_settings: ブログジョブ対象アカウントのみ続行
+    acc_cfg = BLOG_ACCOUNT_SETTINGS.get(args.account, {})
+    if not acc_cfg.get("enabled"):
         logger.info(
-            "account=%s は ACCOUNT_SETTINGS.enabled_blog=False のため終了します（投稿しません）",
+            "account=%s は BLOG_ACCOUNT_SETTINGS.enabled=False のため終了します（投稿しません）",
             args.account,
         )
         sys.exit(0)
@@ -250,7 +250,7 @@ def main() -> None:
         point = post.get("auto_point", "")
         campaigns = post.get("campaign") or []
 
-        cfg = ACCOUNT_SETTINGS.get(args.account, {})
+        cfg = BLOG_ACCOUNT_SETTINGS.get(args.account, {})
         site = cfg.get("site", "fanza")
         if site == "dmm":
             portal_url = f"https://dmmportal.jp/{service}/{floor}/{content_id}"

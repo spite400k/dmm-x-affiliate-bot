@@ -2,7 +2,7 @@ import logging
 import random
 import time
 
-from config.settings import ACCOUNT_SETTINGS
+from config.x_settings import X_ACCOUNT_SETTINGS
 from db.post_repository import (
     get_next_post,
     mark_post_as_posted,
@@ -56,7 +56,7 @@ def _exclude_item_after_post_failure(
 
 
 def main() -> None:
-    for account_id, config in ACCOUNT_SETTINGS.items():
+    for account_id, config in X_ACCOUNT_SETTINGS.items():
         if not config.get("enabled"):
             logger.info(
                 "⚠️ %s は実施フラグOFFのためスキップします",

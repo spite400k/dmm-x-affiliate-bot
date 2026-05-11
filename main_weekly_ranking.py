@@ -11,7 +11,7 @@ import logging
 import os
 import time
 
-from config.settings import ACCOUNT_SETTINGS
+from config.x_settings import X_ACCOUNT_SETTINGS
 from twitter_api.safe_post import safe_post_tweet
 from twitter_api.twitter_client import get_clients
 from utils.logger import setup_logger
@@ -20,7 +20,7 @@ from utils.portal_ranking import RankingPage, fetch_weekly_ranking
 setup_logger("main_weekly_ranking.log")
 logger = logging.getLogger(__name__)
 
-# (ランキングページ URL, Twitter アカウント ID … settings.ACCOUNT_SETTINGS と同一キー)
+# (ランキングページ URL, Twitter アカウント ID … x_settings.X_ACCOUNT_SETTINGS と同一キー)
 # main2.py は API_KEY_1 固定。FANZA 行が "2" のときは get_clients("2")→403 になり main2 と差が出る。
 WEEKLY_RANKING_SEQUENCE: list[tuple[str, str]] = [
     ("https://www.fanzaportal.com/ranking/videoa/weekly", "2"),
@@ -135,7 +135,7 @@ def log_ranking_post_content(
 def main() -> None:
     dry = os.environ.get("DRY_RUN", "").strip() in ("1", "true", "yes", "on")
 
-    for account_id, config in ACCOUNT_SETTINGS.items():
+    for account_id, config in X_ACCOUNT_SETTINGS.items():
         if not config.get("enabled"):
             logger.info(
                 "⚠️ %s は実施フラグOFFのためスキップします",
