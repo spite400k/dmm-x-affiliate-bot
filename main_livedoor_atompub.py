@@ -9,16 +9,19 @@
      （False ならログを出して終了コード 0）
   2) Supabase mst_blog_accounts を取得（platform=livedoor, enabled=true, account_id=--account）
      行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
-  3) livedoor.blogcms.jp へ AtomPub POST
+  3) BLOG_ACCOUNT_SETTINGS の targets（またはマスタの service/floor）で未投稿を取得し、
+     livedoor.blogcms.jp へ AtomPub POST（--all-targets で targets を順に試行）
 
 .env:
   SUPABASE_URL_{ACCOUNT}, SUPABASE_KEY_{ACCOUNT}（ACCOUNT は既定 1 → _1）
   LIVEDOOR_ARTICLE_STYLE=popular …長文レビュー風 HTML（simple で従来どおり）
 
 使用例:
-  python post_livedoor_atompub.py --service ebook --floor comic
-  python post_livedoor_atompub.py --account 2 --service digital --floor videoa --draft
-  python post_livedoor_atompub.py --manual "テスト" --body "<p>HTML</p>"
+  python main_livedoor_atompub.py --service ebook --floor comic
+  python main_livedoor_atompub.py --account 2 --service digital --floor videoa --draft
+  python main_livedoor_atompub.py --account 1 --all-targets
+    … BLOG_ACCOUNT_SETTINGS の targets を順に試し、キューがあるものから1件ずつ投稿
+  python main_livedoor_atompub.py --manual "テスト" --body "<p>HTML</p>"
 
 手動デバッグをソースに直書きする場合:
   下の MANUAL_DEBUG_FROM_SOURCE を True にし、DEBUG_MANUAL_TITLE / DEBUG_MANUAL_BODY_HTML を編集して
@@ -60,6 +63,7 @@ from livedoor_blog.post import (
     post_to_livedoor_blog,
 )
 from twitter_api.tweet_service import format_campaigns
+from utils.blog_targets import resolve_post_targets
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +95,96 @@ def _dry_run() -> bool:
     )
 
 
+def run_livedoor_one_item(
+    account_id: str,
+    service: str,
+    floor: str,
+    site: str,
+    blog_key_for_status: str,
+    *,
+    dry: bool,
+    no_mark_posted: bool,
+) -> bool:
+    """Supabase から1件取り AtomPub 投稿する。投稿または DRY プレビューができれば True。"""
+    post = get_next_post(
+        service,
+        floor,
+        account_id,
+        blog_key=blog_key_for_status,
+    )
+    if not post:
+        logger.info(
+            "投稿対象なし: account=%s service=%s floor=%s",
+            account_id,
+            service,
+            floor,
+        )
+        return False
+
+    item_id = post["id"]
+    content_id = post["content_id"]
+    service_pg = post["service"]
+    floor_pg = post["floor"]
+    affiliate_url = post["affiliate_url"]
+    image_large_url = post.get("image_large_url", "")
+    image_small_url = post.get("image_small_url", "")
+    comment = post.get("auto_comment", "")
+    summary = post.get("auto_summary", "")
+    point = post.get("auto_point", "")
+    campaigns = post.get("campaign") or []
+
+    if site == "dmm":
+        portal_url = f"https://dmmportal.jp/{service_pg}/{floor_pg}/{content_id}"
+    else:
+        portal_url = f"https://fanzaportal.com/{floor_pg}/{content_id}"
+
+    title = post["title"]
+    ai_review = get_ai_review_summary(account_id, content_id)
+    display_title = blog_post_title_for_item(title, post, ai_review)
+    twitter_text = build_twitter_text(
+        display_title,
+        comment,
+        summary,
+        point,
+        campaigns,
+        affiliate_url,
+    )
+    body_html = build_livedoor_blog_html(
+        title=display_title,
+        twitter_text=twitter_text,
+        affiliate_url=affiliate_url,
+        portal_url=portal_url,
+        image_large_url=image_large_url or image_small_url,
+        summary=summary,
+        point=point,
+        comment=comment,
+        item_row=post,
+        ai_review_row=ai_review,
+    )
+    logger.info("Supabase 取得: %s - %s（投稿タイトル: %s）", item_id, title, display_title)
+
+    if dry:
+        logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:8000])
+        return True
+
+    try:
+        post_to_livedoor_blog(display_title, body_html)
+    except Exception as e:
+        logger.exception("投稿に失敗しました: %s", e)
+        sys.exit(1)
+
+    if not no_mark_posted:
+        try:
+            mark_post_as_posted(item_id, account_id, blog_key=blog_key_for_status)
+            logger.info("Supabase 投稿済みマーク: %s", item_id)
+        except Exception as e:
+            logger.exception("投稿済みマークに失敗しました（ブログは投稿済み）: %s", e)
+            sys.exit(1)
+
+    logger.info("投稿が完了しました: %s", display_title)
+    return True
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -117,11 +211,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--service",
-        help="未投稿行の service（例: ebook, digital）。--manual でないとき必須",
+        help="未投稿行の service（例: ebook, digital）。--all-targets 時は不要",
     )
     parser.add_argument(
         "--floor",
-        help="未投稿行の floor（例: comic, videoa）。--manual でないとき必須",
+        help="未投稿行の floor（例: comic, videoa）。--all-targets 時は不要",
+    )
+    parser.add_argument(
+        "--all-targets",
+        action="store_true",
+        help="BLOG_ACCOUNT_SETTINGS の targets（またはマスタの service/floor）を順に試し、キューがある組み合わせで投稿",
     )
     mg = parser.add_mutually_exclusive_group()
     mg.add_argument("--body", dest="body", help="--manual 時の本文 HTML")
@@ -219,75 +318,73 @@ def main() -> None:
         display_title = title
         item_id = None
     else:
-        if not args.service or not args.floor:
+        if args.all_targets and (args.service or args.floor):
+            parser.error("--all-targets のときは --service / --floor を併用しないでください")
+        if not args.all_targets and (not args.service or not args.floor):
             parser.error(
-                "Supabase から取得するには --service と --floor を指定してください"
+                "Supabase から取得するには --service と --floor、または --all-targets を指定してください"
             )
-        post = get_next_post(
+
+        dry = _dry_run()
+        if args.all_targets:
+            targets_list = resolve_post_targets(acc_cfg, ld_cfg)
+            if not targets_list:
+                logger.error(
+                    "投稿ターゲットが解決できませんでした。"
+                    " BLOG_ACCOUNT_SETTINGS[%r][targets] を設定するか、mst_blog_accounts に "
+                    "service と floor を設定してください。",
+                    args.account,
+                )
+                sys.exit(2)
+            any_done = False
+            for t in targets_list:
+                logger.info(
+                    "ターゲット試行: service=%s floor=%s site=%s",
+                    t["service"],
+                    t["floor"],
+                    t["site"],
+                )
+                if run_livedoor_one_item(
+                    args.account,
+                    t["service"],
+                    t["floor"],
+                    t["site"],
+                    blog_key_for_status,
+                    dry=dry,
+                    no_mark_posted=args.no_mark_posted,
+                ):
+                    any_done = True
+                    if dry:
+                        sys.exit(0)
+            if not any_done:
+                sys.exit(2)
+            return
+
+        site = (
+            str(ld_cfg.get("site") or "").strip()
+            or str(acc_cfg.get("site") or "fanza").strip()
+        )
+        ok = run_livedoor_one_item(
+            args.account,
             args.service,
             args.floor,
-            args.account,
-            blog_key=blog_key_for_status,
+            site,
+            blog_key_for_status,
+            dry=dry,
+            no_mark_posted=args.no_mark_posted,
         )
-        if not post:
-            logger.error(
-                "投稿対象なし: account=%s service=%s floor=%s",
-                args.account,
-                args.service,
-                args.floor,
-            )
+        if not ok:
             sys.exit(2)
-
-        item_id = post["id"]
-        content_id = post["content_id"]
-        service = post["service"]
-        floor = post["floor"]
-        affiliate_url = post["affiliate_url"]
-        image_large_url = post.get("image_large_url", "")
-        image_small_url = post.get("image_small_url", "")
-        comment = post.get("auto_comment", "")
-        summary = post.get("auto_summary", "")
-        point = post.get("auto_point", "")
-        campaigns = post.get("campaign") or []
-
-        cfg = BLOG_ACCOUNT_SETTINGS.get(args.account, {})
-        site = cfg.get("site", "fanza")
-        if site == "dmm":
-            portal_url = f"https://dmmportal.jp/{service}/{floor}/{content_id}"
-        else:
-            portal_url = f"https://fanzaportal.com/{floor}/{content_id}"
-
-        title = post["title"]
-        ai_review = get_ai_review_summary(args.account, content_id)
-        display_title = blog_post_title_for_item(title, post, ai_review)
-        twitter_text = build_twitter_text(
-            display_title,
-            comment,
-            summary,
-            point,
-            campaigns,
-            affiliate_url,
-        )
-        body_html = build_livedoor_blog_html(
-            title=display_title,
-            twitter_text=twitter_text,
-            affiliate_url=affiliate_url,
-            portal_url=portal_url,
-            image_large_url=image_large_url or image_small_url,
-            summary=summary,
-            point=point,
-            comment=comment,
-            item_row=post,
-            ai_review_row=ai_review,
-        )
-        logger.info("Supabase 取得: %s - %s（投稿タイトル: %s）", item_id, title, display_title)
+        if dry:
+            sys.exit(0)
+        return
 
     dry = _dry_run()
     if dry:
         logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:8000])
         sys.exit(0)
 
-    # 3) AtomPub POST
+    # 3) AtomPub POST（手動・ソース内デバッグのみ）
     try:
         post_to_livedoor_blog(display_title, body_html)
     except Exception as e:

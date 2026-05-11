@@ -68,7 +68,7 @@ def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
     必須カラム:
       account_id, platform, enabled, blog_id, username, api_password
     任意カラム:
-      blog_key, xmlrpc_url
+      blog_key, xmlrpc_url, site, service, floor（後者は targets 未設定時の 1 件指定用）
 
     BLOG_ACCOUNT_MASTER_TABLE を指定するとテーブル名を変更できる。
     """
@@ -84,13 +84,18 @@ def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
 
     blog_key = _pick(row, "blog_key", "post_key") or f"fc2:{account_id}:{blog_id}"
     xmlrpc_url = _pick(row, "xmlrpc_url", "api_url") or DEFAULT_FC2_XMLRPC_URL
-    return {
+    out: dict[str, str] = {
         "blog_key": blog_key,
         "blog_id": blog_id,
         "username": username,
         "password": password,
         "xmlrpc_url": xmlrpc_url,
     }
+    for k in ("site", "service", "floor"):
+        v = str(row.get(k) or "").strip()
+        if v:
+            out[k] = v
+    return out
 
 
 def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
@@ -103,6 +108,7 @@ def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
     blog_memo / blog_key / post_key 列は備考（人間可読なブログ名など）のみ。ログ用。
 
     任意カラム atompub_basic_username: Basic 認証ユーザー名（401 時に blog_id と同じにする等）。
+    任意 site, service, floor: マスタ側の既定（config の targets が空のとき 1 件分のキュー指定に使用）。
     """
     row = _get_enabled_blog_row(account_id, "livedoor")
     if not row:
@@ -128,6 +134,10 @@ def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
     }
     if basic_user:
         out["atompub_basic_username"] = basic_user
+    for k in ("site", "service", "floor"):
+        v = str(row.get(k) or "").strip()
+        if v:
+            out[k] = v
     return out
 
 

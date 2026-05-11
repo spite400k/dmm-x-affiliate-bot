@@ -8,7 +8,7 @@ FC2 のブログID・ユーザー名・XML-RPCパスワードは Supabase のマ
 必須カラム:
   account_id, platform, enabled, blog_id, username, api_password
 任意カラム:
-  blog_key, xmlrpc_url
+  blog_key, xmlrpc_url, site, service, floor（targets 未設定時の 1 件キュー指定用）
 
 FC2 の行は platform='fc2', enabled=true にする。
 ライブドアは同テーブルで platform='livedoor'（post_livedoor_atompub が
@@ -28,7 +28,6 @@ from __future__ import annotations
 import html
 import logging
 import os
-import random
 import time
 import xmlrpc.client
 from typing import Any
@@ -43,6 +42,7 @@ from db.post_repository import (
     mark_post_failed_skip_queue,
 )
 from twitter_api.tweet_service import format_campaigns
+from utils.blog_targets import resolve_post_targets
 from utils.logger import setup_logger
 
 load_dotenv()
@@ -158,139 +158,144 @@ def main() -> None:
             )
             continue
 
-        targets = config.get("targets", [])
-        if not targets:
+        targets_list = resolve_post_targets(config, fc2)
+        if not targets_list:
             logger.info(
-                "%s は targets が空のためスキップします",
+                "%s は投稿ターゲットが解決できないためスキップします（targets またはマスタの service/floor）",
                 config.get("screen_name", account_id),
             )
             continue
 
-        target = random.choice(targets)
-        service = target["service"]
-        floor = target["floor"]
-
-        post = get_next_post(service, floor, account_id, blog_key=fc2["blog_key"])
-        if not post:
-            logger.warning(
-                "投稿対象なし: %s (%s/%s)",
+            service = t["service"]
+            floor = t["floor"]
+            logger.info(
+                "FC2 ターゲット試行: %s service=%s floor=%s",
                 config.get("screen_name", account_id),
                 service,
                 floor,
             )
-            continue
 
-        item_id = post["id"]
-        image_urls = post.get("sample_images") or []
-        affiliate_url = post.get("affiliate_url") or ""
-        comment = post.get("auto_comment", "")
-        summary = post.get("auto_summary", "")
-        point = post.get("auto_point", "")
-        campaigns = post.get("campaign") or []
-        title = post["title"]
+            post = get_next_post(service, floor, account_id, blog_key=fc2["blog_key"])
+            if not post:
+                logger.info(
+                    "投稿対象なし: %s (%s/%s)",
+                    config.get("screen_name", account_id),
+                    service,
+                    floor,
+                )
+                continue
 
-        logger.info("FC2 投稿対象: %s-%s", item_id, title)
+            item_id = post["id"]
+            image_urls = post.get("sample_images") or []
+            affiliate_url = post.get("affiliate_url") or ""
+            comment = post.get("auto_comment", "")
+            summary = post.get("auto_summary", "")
+            point = post.get("auto_point", "")
+            campaigns = post.get("campaign") or []
+            title = post["title"]
 
-        description = build_fc2_description(
-            title=title,
-            comment=comment,
-            summary=summary,
-            point=point,
-            campaigns=campaigns,
-            affiliate_url=affiliate_url,
-            image_urls=image_urls if isinstance(image_urls, list) else [],
-        )
+            logger.info("FC2 投稿対象: %s-%s", item_id, title)
 
-        if dry:
+            description = build_fc2_description(
+                title=title,
+                comment=comment,
+                summary=summary,
+                point=point,
+                campaigns=campaigns,
+                affiliate_url=affiliate_url,
+                image_urls=image_urls if isinstance(image_urls, list) else [],
+            )
+
+            if dry:
+                logger.info(
+                    "[DRY_RUN] FC2 投稿をスキップ。title=%r 本文先頭200文字=%r",
+                    title,
+                    description[:200],
+                )
+                time.sleep(SLEEP_SECONDS_AFTER_POST)
+                continue
+
+            try:
+                post_id = meta_weblog_new_post(
+                    fc2["xmlrpc_url"],
+                    fc2["blog_id"],
+                    fc2["username"],
+                    fc2["password"],
+                    title,
+                    description,
+                    publish=True,
+                )
+            except xmlrpc.client.Fault as e:
+                logger.exception(
+                    "FC2 XML-RPC Fault: %s (%s) faultCode=%s faultString=%s",
+                    config.get("screen_name", account_id),
+                    item_id,
+                    e.faultCode,
+                    e.faultString,
+                )
+                _exclude_item_after_post_failure(
+                    item_id,
+                    account_id,
+                    fc2["blog_key"],
+                    config.get("screen_name", account_id),
+                )
+                time.sleep(SLEEP_SECONDS_AFTER_POST)
+                continue
+            except OSError as e:
+                logger.exception(
+                    "FC2 接続エラー: %s (%s) %s",
+                    config.get("screen_name", account_id),
+                    item_id,
+                    e,
+                )
+                _exclude_item_after_post_failure(
+                    item_id,
+                    account_id,
+                    fc2["blog_key"],
+                    config.get("screen_name", account_id),
+                )
+                time.sleep(SLEEP_SECONDS_AFTER_POST)
+                continue
+            except Exception as e:
+                logger.exception(
+                    "FC2 投稿例外: %s (%s) %s",
+                    config.get("screen_name", account_id),
+                    item_id,
+                    e,
+                )
+                _exclude_item_after_post_failure(
+                    item_id,
+                    account_id,
+                    fc2["blog_key"],
+                    config.get("screen_name", account_id),
+                )
+                time.sleep(SLEEP_SECONDS_AFTER_POST)
+                continue
+
             logger.info(
-                "[DRY_RUN] FC2 投稿をスキップ。title=%r 本文先頭200文字=%r",
-                title,
-                description[:200],
-            )
-            time.sleep(SLEEP_SECONDS_AFTER_POST)
-            continue
-
-        try:
-            post_id = meta_weblog_new_post(
-                fc2["xmlrpc_url"],
-                fc2["blog_id"],
-                fc2["username"],
-                fc2["password"],
-                title,
-                description,
-                publish=True,
-            )
-        except xmlrpc.client.Fault as e:
-            logger.exception(
-                "FC2 XML-RPC Fault: %s (%s) faultCode=%s faultString=%s",
+                "FC2 投稿完了: %s - blog_key=%s item=%s postid=%s",
                 config.get("screen_name", account_id),
-                item_id,
-                e.faultCode,
-                e.faultString,
-            )
-            _exclude_item_after_post_failure(
-                item_id,
-                account_id,
                 fc2["blog_key"],
-                config.get("screen_name", account_id),
-            )
-            time.sleep(SLEEP_SECONDS_AFTER_POST)
-            continue
-        except OSError as e:
-            logger.exception(
-                "FC2 接続エラー: %s (%s) %s",
-                config.get("screen_name", account_id),
                 item_id,
-                e,
-            )
-            _exclude_item_after_post_failure(
-                item_id,
-                account_id,
-                fc2["blog_key"],
-                config.get("screen_name", account_id),
-            )
-            time.sleep(SLEEP_SECONDS_AFTER_POST)
-            continue
-        except Exception as e:
-            logger.exception(
-                "FC2 投稿例外: %s (%s) %s",
-                config.get("screen_name", account_id),
-                item_id,
-                e,
-            )
-            _exclude_item_after_post_failure(
-                item_id,
-                account_id,
-                fc2["blog_key"],
-                config.get("screen_name", account_id),
-            )
-            time.sleep(SLEEP_SECONDS_AFTER_POST)
-            continue
-
-        logger.info(
-            "FC2 投稿完了: %s - blog_key=%s item=%s postid=%s",
-            config.get("screen_name", account_id),
-            fc2["blog_key"],
-            item_id,
-            post_id,
-        )
-
-        try:
-            mark_post_as_posted(item_id, account_id, blog_key=fc2["blog_key"])
-            logger.info(
-                "投稿済みマーク完了: %s - %s (%s)",
-                config.get("screen_name", account_id),
-                item_id,
-                fc2["blog_key"],
-            )
-        except Exception as e:
-            logger.error(
-                "投稿済みマーク失敗: %s (%s)",
-                config.get("screen_name", account_id),
-                e,
+                post_id,
             )
 
-        time.sleep(SLEEP_SECONDS_AFTER_POST)
+            try:
+                mark_post_as_posted(item_id, account_id, blog_key=fc2["blog_key"])
+                logger.info(
+                    "投稿済みマーク完了: %s - %s (%s)",
+                    config.get("screen_name", account_id),
+                    item_id,
+                    fc2["blog_key"],
+                )
+            except Exception as e:
+                logger.error(
+                    "投稿済みマーク失敗: %s (%s)",
+                    config.get("screen_name", account_id),
+                    e,
+                )
+
+            time.sleep(SLEEP_SECONDS_AFTER_POST)
 
 
 if __name__ == "__main__":

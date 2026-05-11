@@ -8,9 +8,12 @@
 --   blog_key … 任意。備考用（人間可読なブログ名など）。投稿済みキーはアプリが livedoor:{blog_id} を使う
 --   blog_memo … blog_key の別名としても可（どちらかに備考を入れればログに出る）
 --   xmlrpc_url … ライブドアでは未使用（NULL でよい）
+--   site … 任意。dmm / fanza（ポータルリンク・未投稿キュー参照の既定サイト）
+--   service, floor … 任意。config の targets が空のとき、1 件分のキュー指定に使用
 --
 -- platform = 'fc2' のとき:
 --   xmlrpc_url … 未指定なら http://blog.fc2.com/xmlrpc.php（アプリ側デフォルト）
+--   site, service, floor … 任意。config の targets が空のとき main_fc2_blog の 1 件キュー指定に使用
 
 create table if not exists public.mst_blog_accounts (
   id uuid not null default gen_random_uuid (),
@@ -22,6 +25,9 @@ create table if not exists public.mst_blog_accounts (
   api_password text not null,
   blog_key text null,
   xmlrpc_url text null,
+  site text null,
+  service text null,
+  floor text null,
   created_at timestamptz null default now(),
   updated_at timestamptz null default now(),
   constraint mst_blog_accounts_pkey primary key (id),

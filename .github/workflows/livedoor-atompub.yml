@@ -32,8 +32,8 @@ jobs:
           echo "SUPABASE_URL_1=${{ secrets.SUPABASE_URL_1 }}" >> .env
           echo "SUPABASE_KEY_1=${{ secrets.SUPABASE_KEY_1 }}" >> .env
 
-      - name: Run Livedoor AtomPub (1件)
-        run: python main_livedoor_atompub.py --account 1 --service ebook --floor photo
+      - name: Run Livedoor AtomPub (targets ループ)
+        run: python main_livedoor_atompub.py --account 1 --all-targets
 
       - name: Upload debug artifacts
         if: always()
