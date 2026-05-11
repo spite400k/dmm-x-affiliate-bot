@@ -25,8 +25,9 @@ Playwright:
 
 記事 HTML の体裁:
   LIVEDOOR_ARTICLE_STYLE=simple（既定）…従来のフラットな段落。
-  LIVEDOOR_ARTICLE_STYLE=popular …リード・h2 見出し・ヒーロー画像・末尾の
+  LIVEDOOR_ARTICLE_STYLE=popular …リード・h2 見出し・末尾の
     購入案内リストなど、読みやすい長文記事風（人気ブログの一般的な構成を参考）。
+    記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items 相当の dict を渡すと、
     ジャンル・出演・価格・スペック表・サンプル画像・立ち読みリンクなどを本文に展開する。
   ai_review_row=… に dmm_ai_review_summaries 相当を渡すと、レビュー要旨・AIスコア・読者像・注意点を追記する。
@@ -38,6 +39,8 @@ import html as html_module
 import json
 import logging
 import os
+import re
+import unicodedata
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
 
@@ -354,6 +357,94 @@ def _avg_rating_display(val: object) -> str | None:
         return None
 
 
+def _strip_okuri_brackets(title: str) -> str:
+    """先頭の【…】を繰り返し除去（商品名の芯だけ取り出す）。"""
+    t = title.strip()
+    while True:
+        m = re.match(r"^【[^】]+】\s*", t)
+        if not m:
+            break
+        t = t[m.end() :].strip()
+    return t
+
+
+def _title_suggests_ebook_digital_bonus(title: str) -> bool:
+    t = title
+    return "電子版" in t and (
+        "特典" in t or "限定" in t or "だけ" in t or "カット" in t
+    )
+
+
+def _parse_credit_names(val: object) -> list[str]:
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if str(x).strip()][:4]
+    s = str(val).strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            parsed = json.loads(s.replace("'", '"'))
+        except json.JSONDecodeError:
+            return [s]
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()][:4]
+    return [s]
+
+
+def _primary_credit_label(item: dict[str, Any]) -> tuple[str, list[str]]:
+    """（ラベル, 名前の配列）。出演があれば出演を優先。"""
+    for label, key in (("出演", "actress"), ("著者", "author"), ("監督", "director")):
+        names = _parse_credit_names(item.get(key))
+        if names:
+            return label, names
+    return "", []
+
+
+def blog_post_title_for_item(
+    title: str,
+    item: dict[str, Any] | None = None,
+    ai_review_row: dict[str, Any] | None = None,
+) -> str:
+    """検索・SNS で指が止まりやすい短めのキャッチタイトル（必要なときだけ加工）。"""
+    raw = os.environ.get("LIVEDOOR_CATCHY_TITLE", "1").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return title.strip()
+    t = title.strip()
+    core = _strip_okuri_brackets(t) or t
+    bonus = _title_suggests_ebook_digital_bonus(t)
+    digest = _item_str(ai_review_row.get("review_digest")) if ai_review_row else ""
+    mid = ""
+    if "王道" in digest or "王道" in core:
+        mid = "王道グラビアの手応えを味わえる"
+    if bonus and core:
+        hook = "【電子版限定カットが熱い】"
+        tail = "レビュー！今すぐチェック"
+        if mid:
+            tail = f"レビュー！{mid}｜今すぐチェック"
+        candidate = f"{hook}{core}{tail}"
+        if len(candidate) <= 120:
+            return candidate
+        short_core = core if len(core) <= 48 else core[:47] + "…"
+        return f"{hook}{short_core}レビュー｜今すぐチェック"
+    if len(t) > 58:
+        return f"{core[:52]}… レビュー｜チェック" if len(core) > 52 else f"{core} レビュー｜チェック"
+    return t
+
+
+def _trim_for_reader(text: str, *, max_chars: int = 320) -> str:
+    s = text.strip()
+    if not s:
+        return ""
+    # 長文の定型見出しが続く場合は先頭段落だけを採用
+    first_para = s.split("\n\n", 1)[0].strip()
+    s = first_para or s
+    if len(s) <= max_chars:
+        return s
+    return s[: max_chars - 1].rstrip() + "…"
+
+
 def _ai_review_sections_html(row: dict[str, Any] | None) -> str:
     """dmm_ai_review_summaries 由来（レビュー要約・スコア・読者像・注意点）。"""
     if not row:
@@ -466,6 +557,223 @@ def _merged_rich_sections_html(
     return "\n".join(c for c in chunks if c)
 
 
+def _editorial_article_sections_html(
+    item: dict[str, Any] | None,
+    canonical_title: str,
+    ai_row: dict[str, Any] | None,
+    affiliate_url: str,
+    *,
+    article_headline: str | None = None,
+) -> str:
+    """編集ブロック。冒頭の魅力のあと、推しポイント → 読者の反応 → デジタル版の強み → おすすめ層の順。"""
+    if not item:
+        return ""
+    esc = html_module.escape
+    ct = canonical_title.strip()
+    genres = _normalize_genres(item.get("genres"))
+    maker = _item_str(item.get("maker"))
+    price = _format_price_yen(item.get("price"))
+    digest_raw = _item_str(ai_row.get("review_digest")) if ai_row else ""
+    readers = _text_array_field(ai_row.get("reader_types")) if ai_row else []
+    rc_item = item.get("review_count")
+    ra_item = item.get("review_average")
+    try:
+        rcn = int(rc_item) if rc_item is not None else 0
+    except (TypeError, ValueError):
+        rcn = 0
+    rav: float | None = None
+    if ra_item is not None:
+        try:
+            rav = float(ra_item)
+        except (TypeError, ValueError):
+            rav = None
+    label, names = _primary_credit_label(item)
+    name_phrase = "、".join(names[:2]) if names else ""
+    bonus = _title_suggests_ebook_digital_bonus(ct)
+
+    parts: list[str] = []
+
+    # ■ 魅力の核（体験＋踏み込んだ理由）
+    head = "作品の魅力"
+    if name_phrase:
+        head = f"{name_phrase}の集大成、作品の魅力"
+    parts.append(f"<h2>{esc(head)}</h2>")
+    intro_bits: list[str] = []
+    if (
+        article_headline is not None
+        and article_headline.strip()
+        and _norm_title_for_dedupe(ct) == _norm_title_for_dedupe(article_headline)
+    ):
+        intro_bits.append(
+            "本作は、画面を進めるたびに視線が釘付けになる密度の高さが魅力です。"
+        )
+    else:
+        intro_bits.append(
+            f"『{ct}』は、画面を進めるたびに視線が釘付けになる密度の高さが魅力です。"
+        )
+    if maker:
+        intro_bits.append(f"{maker}ならではの仕上がりで、世界観ごと没入できる体験が得られます。")
+    elif genres:
+        intro_bits.append(f"「{'・'.join(genres[:3])}」の空気感を存分に味わえます。")
+    parts.append("<p>" + esc("".join(intro_bits)) + "</p>")
+    fan_line = (
+        f"だから{name_phrase}ファンなら、気になった瞬間に公式ページを開いておく価値が大きい一冊です。"
+        if name_phrase
+        else "だからジャンルが好きな方なら、一度は公式ページで中身を確かめておきたい作品です。"
+    )
+    parts.append("<p>" + esc(fan_line) + "</p>")
+
+    # ① 推しポイント
+    parts.append("<h2>ここが推しポイント！</h2>")
+    density = (
+        "ロケーションのメリハリが効いていて、開放感と落ち着きの両方から魅力が立ち上がる構成です。"
+    )
+    if digest_raw and ("オーストラリア" in digest_raw or "茨城" in digest_raw):
+        density = (
+            "南半球の開放的な風景と、原点の地のしっとりした空気感の対比が、"
+            "多面的な魅力を一段と引き出しています。"
+        )
+    parts.append("<h3>圧倒的な密度</h3>")
+    parts.append("<p>" + esc(density) + "</p>")
+
+    costume = "王道のビキニから大人っぽいランジェリーまで、シーンごとの変化を楽しめる構成です。"
+    if digest_raw and ("ヌーディ" in digest_raw or "ヌード" in digest_raw or "ランジェリー" in digest_raw):
+        costume = (
+            "王道のビキニから大人っぽいランジェリー、さらに挑戦的なカットまで。"
+            "「今、ここで見たい表情と衣装」が詰まった満足感が得られます。"
+        )
+    elif genres:
+        costume = (
+            f"「{'・'.join(genres[:3])}」の文脈に沿った衣装展開で、"
+            "見どころの振れ幅を存分に楽しめます。"
+        )
+    parts.append("<h3>衣装のバリエーション</h3>")
+    parts.append("<p>" + esc(costume) + "</p>")
+
+    # ② 読者の反応（推しポイントの直後）
+    if rcn > 0 or rav is not None or digest_raw or readers:
+        parts.append("<h2>読者の反応と評価</h2>")
+        react: list[str] = []
+        if rav is not None:
+            react.append(f"ユーザー評価は平均 {rav:.1f} 点と高く")
+        if rcn > 0:
+            react.append(f"レビューは {rcn} 件と厚みがあります")
+        if react:
+            praise = ""
+            if digest_raw or rcn >= 5:
+                praise = (
+                    "「高密度な写真群に圧倒された」「王道の完成度が高い」"
+                    "といった絶賛のニュアンスも目立ちます。"
+                )
+            parts.append("<p>" + esc("、".join(react) + "。") + esc(praise) + "</p>")
+        elif digest_raw:
+            parts.append(
+                "<p>"
+                + esc("レビュー要約では、満足度の高い声が中心に集まっています。")
+                + "</p>"
+            )
+        if digest_raw:
+            quote = _trim_for_reader(digest_raw.replace("\n\n", " "), max_chars=220)
+            parts.append("<p><strong>読者の声（抜粋）</strong></p>")
+            parts.append("<blockquote><p>" + esc(quote) + "</p></blockquote>")
+        rc_ai = _smallint_display(ai_row.get("review_count")) if ai_row else None
+        ar_ai = _avg_rating_display(ai_row.get("avg_rating")) if ai_row else None
+        if rc_ai or ar_ai:
+            bits = []
+            if rc_ai:
+                bits.append(f"本記事の要約では参照レビュー {rc_ai} 件")
+            if ar_ai:
+                bits.append(f"平均 {ar_ai} 点")
+            parts.append("<p><small>" + esc("、".join(bits) + "。") + "</small></p>")
+
+    # ③ デジタル版の強み（電子版の特権 → 価格 → 今すぐ読める → サンプル誘導）
+    parts.append("<h3>電子版（DMM）ならではの特権</h3>")
+    if bonus:
+        parts.append(
+            "<p>"
+            + esc(
+                "紙版にはない「電子版だけの特典カット」が収録されている点が最大の武器です。"
+                "ファンならこちらを選ばない手はありません。"
+            )
+            + "</p>"
+        )
+    else:
+        parts.append(
+            "<p>"
+            + esc(
+                "デジタル配信なら、購入後すぐに手元の端末で高画質のまま楽しめます。"
+                "拡大しながら質感や表情の細部まで味わえるのも大きな利点です。"
+            )
+            + "</p>"
+        )
+    if price:
+        parts.append(
+            "<p>"
+            + esc(
+                f"価格は {price} と写真集としては標準的ながら、"
+                "上記の体験価値を考えると納得感が出やすい帯です。"
+            )
+            + "</p>"
+        )
+
+    parts.append("<h2>デジタル版なら「今すぐ読める」</h2>")
+    parts.append(
+        "<p>"
+        + esc(
+            "DMMの電子版なら、購入後は待ち時間ほぼゼロで、数十秒以内にスマホやタブレットで読み始められます。"
+            "「今この気分で見たい」にそのまま応えられるスピード感が、デジタルならではのベネフィットです。"
+        )
+        + "</p>"
+    )
+    sample_href = _item_str(affiliate_url) or _item_str(item.get("item_url"))
+    if sample_href:
+        uq = esc(sample_href, quote=True)
+        parts.append(
+            "<p>まずは"
+            f'<a href="{uq}" rel="nofollow sponsored">'
+            + esc("公式の作品ページ")
+            + "</a>"
+            + esc(
+                "で、無料で見られるサンプル画像をチェックしてみてください。"
+                "中身のトーンが自分に合うか、一瞬で判断しやすくなります。"
+            )
+            + "</p>"
+        )
+
+    # こんな人におすすめ
+    if readers:
+        parts.append("<h2>こんな人におすすめ</h2>")
+        parts.append("<ul>")
+        for r in readers[:5]:
+            extra = ""
+            rl = r.strip()
+            if "写真集" in rl or "ファン" in rl:
+                extra = (
+                    "これまでの歩みを振り返りつつ、最新の輝きを手元に残したい方。"
+                )
+            elif "新規" in rl or "初心者" in rl:
+                extra = "入り口として負担が少なく、世界観を一気に味わえる方。"
+            elif "画質" in rl or "高画質" in rl:
+                extra = "拡大表示で質感や表情の細部までじっくり見比べたい方。"
+            else:
+                extra = "本作のテンションと相性が良さそうな方。"
+            parts.append(
+                "<li><strong>" + esc(rl) + "</strong>：" + esc(extra) + "</li>"
+            )
+        parts.append("</ul>")
+    elif name_phrase:
+        parts.append("<h2>こんな人におすすめ</h2>")
+        parts.append(
+            "<ul><li><strong>"
+            + esc(f"{name_phrase}ファン")
+            + "</strong>："
+            + esc("最新作の熱量を逃さずチェックしたい方。")
+            + "</li></ul>"
+        )
+
+    return "\n".join(parts)
+
+
 def _article_style(article_style: str | None) -> str:
     raw = (
         article_style
@@ -473,6 +781,28 @@ def _article_style(article_style: str | None) -> str:
         else os.environ.get("LIVEDOOR_ARTICLE_STYLE", "simple")
     ).strip().lower()
     return raw if raw in ("simple", "popular") else "simple"
+
+
+def _norm_title_for_dedupe(s: str) -> str:
+    """全角半角差・連続空白のゆらぎを吸収してタイトル同定に使う。"""
+    t = unicodedata.normalize("NFKC", (s or "").strip())
+    return " ".join(t.split())
+
+
+def _twitter_blocks_without_title_echo(twitter_text: str, headline: str) -> list[str]:
+    """記事タイトル欄と同じ文言のブロックは本文から省く（Atom の title と二重にならない）。"""
+    h = _norm_title_for_dedupe(headline)
+    if not h:
+        return [b.strip() for b in twitter_text.split("\n\n") if b.strip()]
+    out: list[str] = []
+    for b in twitter_text.split("\n\n"):
+        p = b.strip()
+        if not p:
+            continue
+        if _norm_title_for_dedupe(p) == h:
+            continue
+        out.append(p)
+    return out
 
 
 def _build_simple_livedoor_html(
@@ -486,19 +816,21 @@ def _build_simple_livedoor_html(
     ai_review_row: dict[str, Any] | None,
 ) -> str:
     parts: list[str] = []
-    parts.append(f"<h1>{html_module.escape(title)}</h1>")
+    # タイトルは Atom <title> で既に表示されるため本文では繰り返さない
     if image_large_url.strip():
         u = html_module.escape(image_large_url.strip(), quote=True)
         parts.append(f'<p><img src="{u}" alt="" loading="lazy" /></p>')
-    for block in twitter_text.split("\n\n"):
-        p = block.strip()
-        if not p:
-            continue
-        inner = html_module.escape(p).replace("\n", "<br />\n")
+    for block in _twitter_blocks_without_title_echo(twitter_text, title):
+        inner = html_module.escape(block).replace("\n", "<br />\n")
         parts.append(f"<p>{inner}</p>")
-    rich = _merged_rich_sections_html(item_row, ai_review_row, title)
-    if rich:
-        parts.append(rich)
+    canonical = (
+        _item_str(item_row.get("title")) if item_row else _item_str(title)
+    ) or title
+    editorial = _editorial_article_sections_html(
+        item_row, canonical, ai_review_row, affiliate_url, article_headline=title
+    )
+    if editorial:
+        parts.append(editorial)
     if portal_url.strip():
         u = html_module.escape(portal_url.strip(), quote=True)
         parts.append(
@@ -515,7 +847,7 @@ def _build_simple_livedoor_html(
     if tu:
         u = html_module.escape(tu, quote=True)
         parts.append(
-            f'<p><a href="{u}" rel="nofollow sponsored">立ち読みはこちら（PR）</a></p>'
+            f'<p><a href="{u}" rel="nofollow sponsored">内容をチラ見するならこちら（PR）</a></p>'
         )
     return "\n".join(parts)
 
@@ -538,48 +870,59 @@ def _build_popular_livedoor_html(
     blocks = [b.strip() for b in twitter_text.split("\n\n") if b.strip()]
     parts: list[str] = []
     parts.append('<article class="ld-aff-post">')
-    parts.append(f"<h1>{esc(title)}</h1>")
+    # タイトルは Atom <title> で既に表示されるため本文では繰り返さない
     if image_large_url.strip():
         u = esc(image_large_url.strip(), quote=True)
-        parts.append(
-            f'<figure class="hero"><img src="{u}" alt="{esc(title)}" loading="lazy" /></figure>'
-        )
+        # parts.append(
+        #     f'<figure class="hero"><img src="{u}" alt="{esc(title)}" loading="lazy" /></figure>'
+        # )
     lead = (comment or "").strip()
-    if lead:
+    if lead and _norm_title_for_dedupe(lead) != _norm_title_for_dedupe(title):
         inner = esc(lead).replace("\n", "<br />\n")
         parts.append(
             '<p class="lead" style="font-size:105%;line-height:1.75;">'
             f"<strong>{inner}</strong></p>"
         )
-    if summary.strip():
+    if summary.strip() and _norm_title_for_dedupe(summary) != _norm_title_for_dedupe(
+        title
+    ):
         parts.append("<h2>概要・あらすじ</h2>")
         parts.append("<p>" + esc(summary.strip()).replace("\n", "<br />\n") + "</p>")
-    if point.strip():
+    if point.strip() and _norm_title_for_dedupe(point) != _norm_title_for_dedupe(title):
         parts.append("<h2>注目ポイント・推しどころ</h2>")
         parts.append("<p>" + esc(point.strip()).replace("\n", "<br />\n") + "</p>")
-    rich = _merged_rich_sections_html(item_row, ai_review_row, title)
-    if rich:
-        parts.append(rich)
-    seen: set[str] = {title.strip()}
+    canonical = (
+        _item_str(item_row.get("title")) if item_row else _item_str(title)
+    ) or title
+    editorial = _editorial_article_sections_html(
+        item_row, canonical, ai_review_row, affiliate_url, article_headline=title
+    )
+    if editorial:
+        parts.append(editorial)
+    seen_norms: set[str] = {_norm_title_for_dedupe(title)}
     if lead:
-        seen.add(lead)
+        seen_norms.add(_norm_title_for_dedupe(lead))
     if summary.strip():
-        seen.add(summary.strip())
+        seen_norms.add(_norm_title_for_dedupe(summary))
     if point.strip():
-        seen.add(point.strip())
+        seen_norms.add(_norm_title_for_dedupe(point))
     if item_row:
         for np in _narrative_paragraphs_from_item(item_row, title):
-            seen.add(np)
+            seen_norms.add(_norm_title_for_dedupe(np))
     if ai_review_row:
         ad = _item_str(ai_review_row.get("review_digest"))
         if ad:
-            seen.add(ad)
+            seen_norms.add(_norm_title_for_dedupe(ad))
         ast = _item_str(ai_review_row.get("summary_text"))
         if ast:
-            seen.add(ast)
-    extra = [b for b in blocks if b not in seen]
+            seen_norms.add(_norm_title_for_dedupe(ast))
+    extra = [
+        b
+        for b in blocks
+        if _norm_title_for_dedupe(b) not in seen_norms
+    ]
     if extra:
-        parts.append("<h2>作品紹介・お得情報</h2>")
+        parts.append("<h2>もう少し詳しく</h2>")
         for b in extra:
             parts.append("<p>" + esc(b).replace("\n", "<br />\n") + "</p>")
     tachi_li = _tachiyomi_link_html(item_row) if item_row else ""

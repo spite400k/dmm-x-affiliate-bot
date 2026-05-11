@@ -53,6 +53,7 @@ from db.blog_repository import (
 )
 from db.post_repository import get_ai_review_summary, get_next_post, mark_post_as_posted
 from livedoor_blog.post import (
+    blog_post_title_for_item,
     build_livedoor_blog_html,
     post_to_livedoor_blog,
 )
@@ -196,6 +197,7 @@ def main() -> None:
             )
             sys.exit(1)
         title = DEBUG_MANUAL_TITLE.strip()
+        display_title = title
         body_html = DEBUG_MANUAL_BODY_HTML
         item_id = None
         manual_from_source = True
@@ -213,6 +215,7 @@ def main() -> None:
         else:
             body_html = args.body or ""
         title = args.title
+        display_title = title
         item_id = None
     else:
         if not args.service or not args.floor:
@@ -254,17 +257,18 @@ def main() -> None:
             portal_url = f"https://fanzaportal.com/{floor}/{content_id}"
 
         title = post["title"]
+        ai_review = get_ai_review_summary(args.account, content_id)
+        display_title = blog_post_title_for_item(title, post, ai_review)
         twitter_text = build_twitter_text(
-            title,
+            display_title,
             comment,
             summary,
             point,
             campaigns,
             affiliate_url,
         )
-        ai_review = get_ai_review_summary(args.account, content_id)
         body_html = build_livedoor_blog_html(
-            title=title,
+            title=display_title,
             twitter_text=twitter_text,
             affiliate_url=affiliate_url,
             portal_url=portal_url,
@@ -275,7 +279,7 @@ def main() -> None:
             item_row=post,
             ai_review_row=ai_review,
         )
-        logger.info("Supabase 取得: %s - %s", item_id, title)
+        logger.info("Supabase 取得: %s - %s（投稿タイトル: %s）", item_id, title, display_title)
 
     dry = _dry_run()
     if dry:
@@ -284,7 +288,7 @@ def main() -> None:
 
     # 3) AtomPub POST
     try:
-        post_to_livedoor_blog(title, body_html)
+        post_to_livedoor_blog(display_title, body_html)
     except Exception as e:
         logger.exception("投稿に失敗しました: %s", e)
         sys.exit(1)
@@ -304,7 +308,7 @@ def main() -> None:
             logger.exception("投稿済みマークに失敗しました（ブログは投稿済み）: %s", e)
             sys.exit(1)
 
-    logger.info("投稿が完了しました: %s", title)
+    logger.info("投稿が完了しました: %s", display_title)
 
 
 if __name__ == "__main__":
