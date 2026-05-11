@@ -433,16 +433,62 @@ def blog_post_title_for_item(
     return t
 
 
-def _trim_for_reader(text: str, *, max_chars: int = 320) -> str:
+def _trim_for_reader(
+    text: str, *, max_chars: int = 320, multiline: bool = False
+) -> str:
     s = text.strip()
     if not s:
         return ""
-    # 長文の定型見出しが続く場合は先頭段落だけを採用
-    first_para = s.split("\n\n", 1)[0].strip()
-    s = first_para or s
+    if not multiline:
+        # 長文の定型見出しが続く場合は先頭段落だけを採用
+        first_para = s.split("\n\n", 1)[0].strip()
+        s = first_para or s
     if len(s) <= max_chars:
         return s
     return s[: max_chars - 1].rstrip() + "…"
+
+
+def _reader_voice_digest_to_blockquote_inner(quote: str, esc) -> str:
+    """読者の声引用。blockquote 内は CMS が <br /> を落とすことがあるため改行は <p> の分割のみにする。"""
+    q = quote.strip()
+    if not q:
+        return ""
+
+    def _p_blocks_from_plain(text: str) -> list[str]:
+        """1ブロックを句点または単一改行で複数 <p> に分割。"""
+        t = text.strip()
+        if not t:
+            return []
+        if "\n" in t or "\r" in t:
+            t = t.replace("\r\n", "\n").replace("\r", "\n")
+            lines = [ln.strip() for ln in t.split("\n") if ln.strip()]
+            if len(lines) > 1:
+                return lines
+            t = lines[0] if lines else t
+        segments = [s.strip() for s in t.split("。") if s.strip()]
+        if not segments:
+            return [t]
+        ends_period = t.rstrip().endswith("。")
+        chunks: list[str] = []
+        for i, seg in enumerate(segments):
+            if i < len(segments) - 1:
+                chunks.append(seg + "。")
+            elif ends_period:
+                chunks.append(seg + "。")
+            else:
+                chunks.append(seg)
+        return chunks if len(chunks) > 1 else [t]
+
+    qn = q.replace("\r\n", "\n").replace("\r", "\n")
+    lines_out: list[str] = []
+    if "\n" in qn:
+        for block in [b.strip() for b in qn.split("\n\n") if b.strip()]:
+            for piece in _p_blocks_from_plain(block):
+                lines_out.append("<p>" + esc(piece) + "</p>")
+    else:
+        for piece in _p_blocks_from_plain(qn):
+            lines_out.append("<p>" + esc(piece) + "</p>")
+    return "".join(lines_out)
 
 
 def _ai_review_sections_html(row: dict[str, Any] | None) -> str:
@@ -869,9 +915,11 @@ def _editorial_article_sections_html(
                 + "</p>"
             )
         if digest_raw:
-            quote = _trim_for_reader(digest_raw, max_chars=1220)
+            quote = _trim_for_reader(digest_raw, max_chars=1220, multiline=True)
             parts.append("<p><strong>読者の声（抜粋）</strong></p>")
-            parts.append("<blockquote><p>" + esc(quote) + "</p></blockquote>")
+            inner = _reader_voice_digest_to_blockquote_inner(quote, esc)
+            if inner:
+                parts.append("<blockquote>" + inner + "</blockquote>")
         rc_ai = _smallint_display(ai_row.get("review_count")) if ai_row else None
         ar_ai = _avg_rating_display(ai_row.get("avg_rating")) if ai_row else None
         if rc_ai or ar_ai:
