@@ -557,6 +557,203 @@ def _merged_rich_sections_html(
     return "\n".join(c for c in chunks if c)
 
 
+def _oshi_content_seed(item: dict[str, Any]) -> int:
+    """作品ごとに安定したばらつき用の整数シード。"""
+    key = (
+        _item_str(item.get("content_id"))
+        or _item_str(item.get("product_id"))
+        or _item_str(item.get("title"))
+        or "x"
+    )
+    h = 2166136261
+    for c in key:
+        h = (h ^ ord(c)) * 16777619
+        h &= 0xFFFFFFFF
+    return h % 997
+
+
+def _editorial_oshi_points_fragments(
+    item: dict[str, Any],
+    genres: list[str],
+    digest_raw: str,
+    maker: str,
+    name_phrase: str,
+    rcn: int,
+    rav: float | None,
+) -> tuple[str, list[str]]:
+    """推し欄: h2 文言と <h3>/<p> フラグメント。候補プールから作品シードで順序・見出しを変える。"""
+    esc = html_module.escape
+    seed = _oshi_content_seed(item)
+    digest = digest_raw or ""
+    logger.info(f"digest: {digest}")
+
+    h2_options = (
+        "ここが推しポイント！",
+        "先に押さえたい見どころ",
+    )
+    h2_text = h2_options[seed % len(h2_options)]
+
+    density = (
+        "ロケーションのメリハリが効いていて、開放感と落ち着きの両方から魅力が立ち上がる構成です。"
+    )
+    if digest and ("オーストラリア" in digest or "茨城" in digest):
+        density = (
+            "南半球の開放的な風景と、原点の地のしっとりした空気感の対比が、"
+            "多面的な魅力を一段と引き出しています。"
+        )
+
+    costume = (
+        "王道のビキニから大人っぽいランジェリーまで、シーンごとの変化を楽しめる構成です。"
+    )
+    if digest and ("ヌーディ" in digest or "ヌード" in digest or "ランジェリー" in digest):
+        costume = (
+            "王道のビキニから大人っぽいランジェリー、さらに挑戦的なカットまで。"
+            "「今、ここで見たい表情と衣装」が詰まった満足感が得られます。"
+        )
+    elif genres:
+        costume = (
+            f"「{'・'.join(genres[:3])}」の文脈に沿った衣装展開で、"
+            "見どころの振れ幅を存分に楽しめます。"
+        )
+
+    # (h3, 本文プレーン, 並べ替え用の種別キー)
+    pool: list[tuple[str, str, int]] = []
+
+    d_heads = ("圧倒的な密度", "カットの濃さとテンポ", "構成のメリハリ")
+    pool.append((d_heads[seed % 3], density, 10))
+
+    c_heads = ("衣装のバリエーション", "スタイリングの振れ幅", "ビジュアルの変化球")
+    pool.append((c_heads[(seed // 3) % 3], costume, 11))
+
+    series = _item_str(item.get("series"))
+    if series:
+        pool.append(
+            (
+                "シリーズの文脈でも楽しめる点",
+                f"シリーズ『{series}』の流れを感じつつ、本作だけの尖りと温度差もはっきり立っています。",
+                12,
+            )
+        )
+
+    if maker:
+        pool.append(
+            (
+                "レーベルらしい撮り下ろし感",
+                f"{maker}作品にありがちな、色味と空気の作り込みが本作でも効いています。",
+                13,
+            )
+        )
+
+    if name_phrase:
+        pool.append(
+            (
+                "キャストの魅せ方",
+                f"{name_phrase}の魅力が画面上で前面に出る画面設計になっており、"
+                "推しの延長線でも満足しやすいです。",
+                14,
+            )
+        )
+
+    if rcn >= 5:
+        rb = (
+            f"投稿レビューは{rcn}件と厚みがあり、迷いがちな最後の一押しになる"
+            "「第三者の声」として信頼できます。"
+        )
+        if rav is not None:
+            rb = (
+                f"投稿レビューは{rcn}件、平均 {rav:.1f} 点と数字の裏付けも厚いです。"
+                "手応えの理由を短時間でも把握しやすいです。"
+            )
+        pool.append(("レビューが太い点も材料に", rb, 15))
+    elif rcn >= 1:
+        pool.append(
+            (
+                "レビューで拾える手触り",
+                f"レビューはまだ{rcn}件ながら、購入前に雰囲気の芯を掴む手がかりになります。",
+                16,
+            )
+        )
+
+    vol = _item_str(item.get("volume"))
+    if vol:
+        pool.append(
+            (
+                "収録ボリュームの満足感",
+                f"収録の表記は「{vol}」。一度にまとめて楽しめる密度感も含めて、"
+                "買い切り型の魅力が出やすい構成です。",
+                17,
+            )
+        )
+
+    if _item_str(item.get("sample_movie_url")):
+        pool.append(
+            (
+                "サンプルで先に触れられる体感",
+                "サンプル映像があれば、静止画だけでは伝わりにくいテンポ感や空気感を先に確かめられます。",
+                18,
+            )
+        )
+
+    if digest and any(k in digest for k in ("表情", "微笑", "目線", "目元")):
+        pool.append(
+            (
+                "表情・目線の刺さり",
+                "表情の切り替わりや目線の置き方が、作品の温度を左右する要になっています。",
+                19,
+            )
+        )
+
+    if digest and any(k in digest for k in ("光", "照明", "彩度", "トーン", "色味")):
+        pool.append(
+            (
+                "光と色の作り",
+                "光の当て方や全体のトーンが一貫していて、シーンごとに「見せたい質感」が立ち上がりやすいです。",
+                20,
+            )
+        )
+
+    if digest and any(k in digest for k in ("屋外", "ビーチ", "プール", "海", "水着")):
+        pool.append(
+            (
+                "ロケーションの開放感",
+                "ロケーションの空気感が写真の主役にもなりやすく、季節感や開放感を味わう楽しみ方に向きます。",
+                21,
+            )
+        )
+
+    cat = _item_str(item.get("category_name"))
+    floor = _item_str(item.get("floor")).lower()
+    if "コミック" in cat or "comic" in floor:
+        pool.append(
+            (
+                "コマ割りと読み味の要点",
+                "コマの大小と流れの作りでテンポが出ており、短時間でも世界観に引き込まれやすい配置です。",
+                22,
+            )
+        )
+
+    want_pairs = 3 + (seed % 2)
+    keyed: list[tuple[int, str, str, int]] = []
+    for h3, body, bk in pool:
+        rank = ((seed * 31) ^ (bk * 17)) & 0x7FFFFFFF
+        rank %= 10000
+        keyed.append((rank, h3, body, bk))
+    keyed.sort(key=lambda x: x[0])
+
+    seen_h3: set[str] = set()
+    lines: list[str] = []
+    for _, h3, body, _ in keyed:
+        if h3 in seen_h3:
+            continue
+        seen_h3.add(h3)
+        lines.append(f"<h3>{esc(h3)}</h3>")
+        lines.append(f"<p>{esc(body)}</p>")
+        if len(lines) >= want_pairs * 2:
+            break
+
+    return h2_text, lines
+
+
 def _editorial_article_sections_html(
     item: dict[str, Any] | None,
     canonical_title: str,
@@ -623,32 +820,12 @@ def _editorial_article_sections_html(
     )
     parts.append("<p>" + esc(fan_line) + "</p>")
 
-    # ① 推しポイント
-    parts.append("<h2>ここが推しポイント！</h2>")
-    density = (
-        "ロケーションのメリハリが効いていて、開放感と落ち着きの両方から魅力が立ち上がる構成です。"
+    # ① 推しポイント（候補プール＋作品シードで見出し・順・本数を変える）
+    oshi_h2, oshi_frags = _editorial_oshi_points_fragments(
+        item, genres, digest_raw, maker, name_phrase, rcn, rav
     )
-    if digest_raw and ("オーストラリア" in digest_raw or "茨城" in digest_raw):
-        density = (
-            "南半球の開放的な風景と、原点の地のしっとりした空気感の対比が、"
-            "多面的な魅力を一段と引き出しています。"
-        )
-    parts.append("<h3>圧倒的な密度</h3>")
-    parts.append("<p>" + esc(density) + "</p>")
-
-    costume = "王道のビキニから大人っぽいランジェリーまで、シーンごとの変化を楽しめる構成です。"
-    if digest_raw and ("ヌーディ" in digest_raw or "ヌード" in digest_raw or "ランジェリー" in digest_raw):
-        costume = (
-            "王道のビキニから大人っぽいランジェリー、さらに挑戦的なカットまで。"
-            "「今、ここで見たい表情と衣装」が詰まった満足感が得られます。"
-        )
-    elif genres:
-        costume = (
-            f"「{'・'.join(genres[:3])}」の文脈に沿った衣装展開で、"
-            "見どころの振れ幅を存分に楽しめます。"
-        )
-    parts.append("<h3>衣装のバリエーション</h3>")
-    parts.append("<p>" + esc(costume) + "</p>")
+    parts.append(f"<h2>{esc(oshi_h2)}</h2>")
+    parts.extend(oshi_frags)
 
     # ② 読者の反応（推しポイントの直後）
     if rcn > 0 or rav is not None or digest_raw or readers:
@@ -673,7 +850,7 @@ def _editorial_article_sections_html(
                 + "</p>"
             )
         if digest_raw:
-            quote = _trim_for_reader(digest_raw.replace("\n\n", " "), max_chars=220)
+            quote = _trim_for_reader(digest_raw, max_chars=1220)
             parts.append("<p><strong>読者の声（抜粋）</strong></p>")
             parts.append("<blockquote><p>" + esc(quote) + "</p></blockquote>")
         rc_ai = _smallint_display(ai_row.get("review_count")) if ai_row else None
