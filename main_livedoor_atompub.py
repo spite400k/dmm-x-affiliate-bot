@@ -10,7 +10,8 @@
   2) Supabase mst_blog_accounts を取得（platform=livedoor, enabled=true, account_id=--account）
      行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
   3) BLOG_ACCOUNT_SETTINGS の targets（またはマスタの service/floor）で未投稿を取得し、
-     livedoor.blogcms.jp へ AtomPub POST（--all-targets で targets を順に試行）
+     livedoor.blogcms.jp へ AtomPub POST（--all-targets で targets を順に試行。
+     DRY_RUN（--draft）時も全ターゲットを試し、最初の成功で打ち切らない）
 
 .env:
   SUPABASE_URL_{ACCOUNT}, SUPABASE_KEY_{ACCOUNT}（ACCOUNT は既定 1 → _1）
@@ -354,8 +355,6 @@ def main() -> None:
                     no_mark_posted=args.no_mark_posted,
                 ):
                     any_done = True
-                    if dry:
-                        sys.exit(0)
             if not any_done:
                 sys.exit(2)
             return
@@ -414,7 +413,7 @@ if __name__ == "__main__":
     # 例: ["--account", "1", "--service", "ebook", "--floor", "comic", "--draft"]
     # 例: ["--manual", "タイトル", "--body", "<p>HTML</p>"]
     # _argv_override: list[str] = ["--account", "1", "--service", "ebook", "--floor", "photo", "--draft"]
-    _argv_override: list[str] = []
+    _argv_override: list[str] = ["--account", "1", "--all-targets"]
     if _argv_override:
         sys.argv = [sys.argv[0]] + _argv_override
     main()

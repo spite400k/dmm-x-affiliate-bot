@@ -19,9 +19,9 @@ BLOG_ACCOUNT_SETTINGS = {
         "screen_name": "yuki23675786",
         "targets": [
             {"service": "ebook", "floor": "comic"},
-            {"service": "ebook", "floor": "novel"},
+            # {"service": "ebook", "floor": "novel"},
             # {"service": "ebook", "floor": "otherbooks"},
-            # {"service": "ebook", "floor": "photo"},
+            {"service": "ebook", "floor": "photo"},
         ],
     },
     "2": {

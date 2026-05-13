@@ -112,6 +112,61 @@ def _normalize_genres(genres: object) -> list[str]:
     return [x.strip() for x in s.split(",") if x.strip()]
 
 
+# DMM.com ebook の floor_code と日本語フロア名（編集トーン・表示用）
+_EBOOK_FLOOR_LABEL_JA: dict[str, str] = {
+    "comic": "コミック",
+    "novel": "文芸・ラノベ",
+    "otherbooks": "ビジネス・実用",
+    "photo": "写真集",
+}
+
+
+def _ebook_editorial_tone(item: dict[str, Any]) -> str:
+    """ebook 行の floor / カテゴリから編集トーンキーを返す。非 ebook は 'default'。"""
+    if _item_str(item.get("service")).lower() != "ebook":
+        return "default"
+    fl = _item_str(item.get("floor")).lower()
+    fn = _item_str(item.get("floor_name"))
+    cat = _item_str(item.get("category_name"))
+    for code, ja in _EBOOK_FLOOR_LABEL_JA.items():
+        if fl == code or code in fl or fn == ja or ja in cat:
+            return code
+    if "コミック" in cat or "comic" in cat.lower():
+        return "comic"
+    if any(x in cat for x in ("文芸", "ラノベ", "小説")) or "novel" in cat.lower():
+        return "novel"
+    if any(x in cat for x in ("ビジネス", "実用", "資格", "語学")):
+        return "otherbooks"
+    if "写真" in cat or "グラビア" in cat or "photo" in cat.lower():
+        return "photo"
+    return "photo"
+
+
+def _ebook_floor_clause(service: str, floor_raw: str, tone: str) -> str:
+    """紹介文用: floor コードを日本語ラベルに置き換えつつ列挙。"""
+    s = service.strip()
+    f = floor_raw.strip()
+    if not s or not f:
+        return ""
+    if s.lower() == "ebook" and tone in _EBOOK_FLOOR_LABEL_JA:
+        ja = _EBOOK_FLOOR_LABEL_JA[tone]
+        return f"{s}（{ja}）向けの配信コンテンツ"
+    return f"{s} の {f} 向け配信コンテンツ"
+
+
+def _price_line_genre_phrase(tone: str) -> str:
+    """価格コメント用のジャンル帯表現。"""
+    if tone == "comic":
+        return "電子コミックとしては"
+    if tone == "novel":
+        return "文芸・ラノベの電子版としては"
+    if tone == "otherbooks":
+        return "ビジネス・実用の電子書籍としては"
+    if tone == "photo":
+        return "写真集としては"
+    return "本作のカテゴリとしては"
+
+
 def _format_price_yen(n: object) -> str:
     if n is None:
         return ""
@@ -182,7 +237,10 @@ def _narrative_paragraphs_from_item(item: dict[str, Any], title: str) -> list[st
     if cat:
         clauses.append(f"カテゴリは「{cat}」")
     if service and floor:
-        clauses.append(f"{service} の {floor} 向け配信コンテンツ")
+        tone = _ebook_editorial_tone(item)
+        fc = _ebook_floor_clause(service, floor, tone)
+        if fc:
+            clauses.append(fc)
     if genres:
         gtxt = "、".join(genres[:6])
         if len(genres) > 6:
@@ -415,11 +473,19 @@ def blog_post_title_for_item(
     core = _strip_okuri_brackets(t) or t
     bonus = _title_suggests_ebook_digital_bonus(t)
     digest = _item_str(ai_review_row.get("review_digest")) if ai_review_row else ""
+    tone = _ebook_editorial_tone(item) if item else "default"
     mid = ""
-    if "王道" in digest or "王道" in core:
+    if tone == "photo" and ("王道" in digest or "王道" in core):
         mid = "王道グラビアの手応えを味わえる"
     if bonus and core:
-        hook = "【電子版限定カットが熱い】"
+        if tone == "novel":
+            hook = "【電子版特典が熱い】"
+        elif tone == "otherbooks":
+            hook = "【電子版独占特典が熱い】"
+        elif tone == "comic":
+            hook = "【電子版限定描き下ろしが熱い】"
+        else:
+            hook = "【電子版限定カットが熱い】"
         tail = "レビュー！今すぐチェック"
         if mid:
             tail = f"レビュー！{mid}｜今すぐチェック"
@@ -640,36 +706,91 @@ def _editorial_oshi_points_fragments(
     )
     h2_text = h2_options[seed % len(h2_options)]
 
-    density = (
-        "ロケーションのメリハリが効いていて、開放感と落ち着きの両方から魅力が立ち上がる構成です。"
-    )
-    if digest and ("オーストラリア" in digest or "茨城" in digest):
-        density = (
-            "南半球の開放的な風景と、原点の地のしっとりした空気感の対比が、"
-            "多面的な魅力を一段と引き出しています。"
-        )
+    tone = _ebook_editorial_tone(item)
 
-    costume = (
-        "王道のビキニから大人っぽいランジェリーまで、シーンごとの変化を楽しめる構成です。"
-    )
-    if digest and ("ヌーディ" in digest or "ヌード" in digest or "ランジェリー" in digest):
-        costume = (
-            "王道のビキニから大人っぽいランジェリー、さらに挑戦的なカットまで。"
-            "「今、ここで見たい表情と衣装」が詰まった満足感が得られます。"
+    if tone == "comic":
+        density = (
+            "コマ運びとページめくりのテンポが安定していて、冒頭から物語に入り込みやすい構成です。"
         )
-    elif genres:
+        if digest and any(k in digest for k in ("テンポ", "読みやす", "コマ", "わかりやす")):
+            density = (
+                "コマ割りと流れの作りが読みやすさに効いており、"
+                "手元の端末でも一気読みしやすいリズム感です。"
+            )
         costume = (
-            f"「{'・'.join(genres[:3])}」の文脈に沿った衣装展開で、"
-            "見どころの振れ幅を存分に楽しめます。"
+            "作画の作り込みとキャラ芝居のバランスが良く、見開きや小ネタ回収まで楽しめる密度です。"
         )
+        if genres:
+            costume = (
+                f"「{'・'.join(genres[:3])}」の雰囲気に沿った画風・演出で、"
+                "世界観の統一感と見どころの振れ幅を両立しています。"
+            )
+        d_heads = ("読み味のテンポ", "コマ割りと誘導", "見開きの効き")
+        c_heads = ("作画の作り込み", "キャラの立ち上がり", "画面情報の整理")
+    elif tone == "novel":
+        density = (
+            "語りのトーンと文のリズムが整っていて、長めのセッションでも疲れにくい読み心地です。"
+        )
+        if digest and any(k in digest for k in ("緊迫", "サスペンス", "伏線", "どんでん", "展開")):
+            density = (
+                "展開の起伏と情報の出し方が計算されており、"
+                "先が気になってページを進めたくなる構成です。"
+            )
+        costume = (
+            "人物関係と情景描写の厚みがじわじわ効いて、読後に余韻が残りやすい作りです。"
+        )
+        if genres:
+            costume = (
+                f"「{'・'.join(genres[:3])}」の文脈に沿った世界の立ち上がりで、"
+                "情景イメージを膨らませやすい描写が光ります。"
+            )
+        d_heads = ("文体とテンポ", "語りの引き込み", "情景の立ち上がり")
+        c_heads = ("人物と関係性", "プロットの欠片", "世界観の作り")
+    elif tone == "otherbooks":
+        density = (
+            "章立てと要点の整理が明瞭で、知りたい情報に素早く辿り着きやすい構成です。"
+        )
+        costume = (
+            "図版・表・箇条書きなど、理解を助けるビジュアルが適度に挟まれた実用寄りの作りです。"
+        )
+        if genres:
+            costume = (
+                f"「{'・'.join(genres[:3])}」の実務文脈に沿った事例と解説で、"
+                "そのまま応用しやすい知識の粒度高めです。"
+            )
+        d_heads = ("情報の密度と整理", "章構成のわかりやすさ", "実務への接続")
+        c_heads = ("図表と補足", "すぐ使える示唆", "復習しやすい粒度")
+    else:
+        density = (
+            "ロケーションのメリハリが効いていて、開放感と落ち着きの両方から魅力が立ち上がる構成です。"
+        )
+        if digest and ("オーストラリア" in digest or "茨城" in digest):
+            density = (
+                "南半球の開放的な風景と、原点の地のしっとりした空気感の対比が、"
+                "多面的な魅力を一段と引き出しています。"
+            )
+
+        costume = (
+            "王道のビキニから大人っぽいランジェリーまで、シーンごとの変化を楽しめる構成です。"
+        )
+        if digest and ("ヌーディ" in digest or "ヌード" in digest or "ランジェリー" in digest):
+            costume = (
+                "王道のビキニから大人っぽいランジェリー、さらに挑戦的なカットまで。"
+                "「今、ここで見たい表情と衣装」が詰まった満足感が得られます。"
+            )
+        elif genres:
+            costume = (
+                f"「{'・'.join(genres[:3])}」の文脈に沿った衣装展開で、"
+                "見どころの振れ幅を存分に楽しめます。"
+            )
+        d_heads = ("圧倒的な密度", "カットの濃さとテンポ", "構成のメリハリ")
+        c_heads = ("衣装のバリエーション", "スタイリングの振れ幅", "ビジュアルの変化球")
 
     # (箇条書きラベル, 本文プレーン, 並べ替え用の種別キー)
     pool: list[tuple[str, str, int]] = []
 
-    d_heads = ("圧倒的な密度", "カットの濃さとテンポ", "構成のメリハリ")
     pool.append((d_heads[seed % 3], density, 10))
 
-    c_heads = ("衣装のバリエーション", "スタイリングの振れ幅", "ビジュアルの変化球")
     pool.append((c_heads[(seed // 3) % 3], costume, 11))
 
     series = _item_str(item.get("series"))
@@ -683,23 +804,75 @@ def _editorial_oshi_points_fragments(
         )
 
     if maker:
-        pool.append(
-            (
-                "レーベルらしい撮り下ろし感",
-                f"{maker}作品にありがちな、色味と空気の作り込みが本作でも効いています。",
-                13,
+        if tone == "comic":
+            pool.append(
+                (
+                    "レーベルらしい作画ライン",
+                    f"{maker}作品で馴染みの画風・トーンの作りが、本作でも一貫して感じられます。",
+                    13,
+                )
             )
-        )
+        elif tone == "novel":
+            pool.append(
+                (
+                    "レーベル・シリーズの読み味",
+                    f"{maker}ラインで培われた編集の型が、本作の語りの安定感にもつながっています。",
+                    13,
+                )
+            )
+        elif tone == "otherbooks":
+            pool.append(
+                (
+                    "出版社ラインの信頼感",
+                    f"{maker}の実用・ビジネス系で重ねてきた説明の丁寧さが、本作でもはっきり出ています。",
+                    13,
+                )
+            )
+        else:
+            pool.append(
+                (
+                    "レーベルらしい撮り下ろし感",
+                    f"{maker}作品にありがちな、色味と空気の作り込みが本作でも効いています。",
+                    13,
+                )
+            )
 
     if name_phrase:
-        pool.append(
-            (
-                "キャストの魅せ方",
-                f"{name_phrase}の魅力が画面上で前面に出る画面設計になっており、"
-                "推しの延長線でも満足しやすいです。",
-                14,
+        if tone == "comic":
+            pool.append(
+                (
+                    "キャラの魅せ方",
+                    f"{name_phrase}の魅力がコマとセリフ回しで前面に出ており、"
+                    "推しの延長線でも満足しやすいです。",
+                    14,
+                )
             )
-        )
+        elif tone == "novel":
+            pool.append(
+                (
+                    "著者・語りの魅せ方",
+                    f"{name_phrase}ならではの文体と視点が効いており、"
+                    "ファン目線でも新鮮味を拾いやすいです。",
+                    14,
+                )
+            )
+        elif tone == "otherbooks":
+            pool.append(
+                (
+                    "著者の説明の切れ味",
+                    f"{name_phrase}の説明スタイルが明快で、要点の抜け漏れを感じにくいです。",
+                    14,
+                )
+            )
+        else:
+            pool.append(
+                (
+                    "キャストの魅せ方",
+                    f"{name_phrase}の魅力が画面上で前面に出る画面設計になっており、"
+                    "推しの延長線でも満足しやすいです。",
+                    14,
+                )
+            )
 
     if rcn >= 5:
         rb = (
@@ -760,17 +933,16 @@ def _editorial_oshi_points_fragments(
         )
 
     if digest and any(k in digest for k in ("屋外", "ビーチ", "プール", "海", "水着")):
-        pool.append(
-            (
-                "ロケーションの開放感",
-                "ロケーションの空気感が写真の主役にもなりやすく、季節感や開放感を味わう楽しみ方に向きます。",
-                21,
+        if tone in ("photo", "default"):
+            pool.append(
+                (
+                    "ロケーションの開放感",
+                    "ロケーションの空気感が写真の主役にもなりやすく、季節感や開放感を味わう楽しみ方に向きます。",
+                    21,
+                )
             )
-        )
 
-    cat = _item_str(item.get("category_name"))
-    floor = _item_str(item.get("floor")).lower()
-    if "コミック" in cat or "comic" in floor:
+    if tone == "comic":
         pool.append(
             (
                 "コマ割りと読み味の要点",
@@ -852,6 +1024,7 @@ def _editorial_article_sections_html(
     label, names = _primary_credit_label(item)
     name_phrase = "、".join(names[:2]) if names else ""
     bonus = _title_suggests_ebook_digital_bonus(ct)
+    ebook_tone = _ebook_editorial_tone(item)
 
     parts: list[str] = []
 
@@ -861,28 +1034,53 @@ def _editorial_article_sections_html(
         head = f"{name_phrase}の集大成、作品の魅力"
     parts.append(f"<h2>{esc(head)}</h2>")
     intro_bits: list[str] = []
+    if ebook_tone == "comic":
+        intro_core = "コマの流れとテンポが心地よく、短い休憩でも読み進めたくなる描き込みが魅力です。"
+    elif ebook_tone == "novel":
+        intro_core = "語りのリズムと情景の重なりがじんわり効いて、読後に余韻が残りやすい構成が魅力です。"
+    elif ebook_tone == "otherbooks":
+        intro_core = "要点の整理と実務に繋がる示唆のバランスが良く、すぐ手元に置いておきたい実用性が魅力です。"
+    else:
+        intro_core = "画面を進めるたびに視線が釘付けになる密度の高さが魅力です。"
     if (
         article_headline is not None
         and article_headline.strip()
         and _norm_title_for_dedupe(ct) == _norm_title_for_dedupe(article_headline)
     ):
-        intro_bits.append(
-            "本作は、画面を進めるたびに視線が釘付けになる密度の高さが魅力です。"
-        )
+        intro_bits.append("本作は、" + intro_core)
     else:
-        intro_bits.append(
-            f"『{ct}』は、画面を進めるたびに視線が釘付けになる密度の高さが魅力です。"
-        )
+        intro_bits.append(f"『{ct}』は、" + intro_core)
     if maker:
-        intro_bits.append(f"{maker}ならではの仕上がりで、世界観ごと没入できる体験が得られます。")
+        if ebook_tone == "otherbooks":
+            intro_bits.append(
+                f"{maker}ならではの説明の型で、要点が頭に入りやすい構成が得られます。"
+            )
+        else:
+            intro_bits.append(f"{maker}ならではの仕上がりで、世界観ごと没入できる体験が得られます。")
     elif genres:
         intro_bits.append(f"「{'・'.join(genres[:3])}」の空気感を存分に味わえます。")
     parts.append("<p>" + esc("".join(intro_bits)) + "</p>")
-    fan_line = (
-        f"だから{name_phrase}ファンなら、気になった瞬間に公式ページを開いておく価値が大きい一冊です。"
-        if name_phrase
-        else "だからジャンルが好きな方なら、一度は公式ページで中身を確かめておきたい作品です。"
-    )
+    if name_phrase:
+        if ebook_tone == "comic":
+            fan_line = (
+                f"だから{name_phrase}ファンなら、試し読みで画風とテンポを確かめておく価値が大きい一冊です。"
+            )
+        elif ebook_tone == "novel":
+            fan_line = (
+                f"だから{name_phrase}の文体が好きな方なら、"
+                "冒頭で相性を確かめておきたい一本です。"
+            )
+        elif ebook_tone == "otherbooks":
+            fan_line = (
+                f"だから{name_phrase}の説明スタイルが合う方なら、"
+                "要点整理の相棒にしやすい一冊です。"
+            )
+        else:
+            fan_line = (
+                f"だから{name_phrase}ファンなら、気になった瞬間に公式ページを開いておく価値が大きい一冊です。"
+            )
+    else:
+        fan_line = "だからジャンルが好きな方なら、一度は公式ページで中身を確かめておきたい作品です。"
     parts.append("<p>" + esc(fan_line) + "</p>")
 
     # ① 推しポイント（h2＋リード p＋ ul/li・strong ラベル。プール＋シードで順と件数を変える）
@@ -903,10 +1101,26 @@ def _editorial_article_sections_html(
         if react:
             praise = ""
             if digest_raw or rcn >= 5:
-                praise = (
-                    "「高密度な写真群に圧倒された」「王道の完成度が高い」"
-                    "といった絶賛のニュアンスも目立ちます。"
-                )
+                if ebook_tone == "comic":
+                    praise = (
+                        "「作画の気迫がある」「テンポ良く読めた」"
+                        "といった絶賛のニュアンスも目立ちます。"
+                    )
+                elif ebook_tone == "novel":
+                    praise = (
+                        "「引き込まれる展開」「文体が読みやすい」"
+                        "といった満足の声も目立ちます。"
+                    )
+                elif ebook_tone == "otherbooks":
+                    praise = (
+                        "「実務ですぐ使えた」「要点が整理されている」"
+                        "といった実用面での評価も目立ちます。"
+                    )
+                else:
+                    praise = (
+                        "「高密度な写真群に圧倒された」「王道の完成度が高い」"
+                        "といった絶賛のニュアンスも目立ちます。"
+                    )
             parts.append("<p>" + esc("、".join(react) + "。") + esc(praise) + "</p>")
         elif digest_raw:
             parts.append(
@@ -933,54 +1147,105 @@ def _editorial_article_sections_html(
     # ③ デジタル版の強み（電子版の特権 → 価格 → 今すぐ読める → サンプル誘導）
     parts.append("<h3>電子版（DMM）ならではの特権</h3>")
     if bonus:
-        parts.append(
-            "<p>"
-            + esc(
+        if ebook_tone == "novel":
+            bonus_body = (
+                "紙版にはない「電子版だけの加筆・特典エピソード」などが付く場合があり、"
+                "ファンならデジタルを選ぶ価値が出やすいです。"
+            )
+        elif ebook_tone == "otherbooks":
+            bonus_body = (
+                "紙版にはない「電子版だけの付録データ・リンク集」などが付く場合があり、"
+                "調べ物のスピードが上がる点も魅力です。"
+            )
+        elif ebook_tone == "comic":
+            bonus_body = (
+                "紙版にはない「電子版だけの描き下ろし・特典ページ」が収録されている点が大きな武器です。"
+                "ファンならこちらを選ばない手はありません。"
+            )
+        else:
+            bonus_body = (
                 "紙版にはない「電子版だけの特典カット」が収録されている点が最大の武器です。"
                 "ファンならこちらを選ばない手はありません。"
             )
-            + "</p>"
-        )
+        parts.append("<p>" + esc(bonus_body) + "</p>")
     else:
-        parts.append(
-            "<p>"
-            + esc(
+        if ebook_tone == "comic":
+            nobonus = (
+                "デジタル配信なら、購入後すぐに端末で高解像度のまま読み始められます。"
+                "拡大表示でコマやセリフの細部まで追いやすいのも利点です。"
+            )
+        elif ebook_tone == "novel":
+            nobonus = (
+                "デジタル配信なら、購入後すぐに端末で読み始められます。"
+                "文字サイズや余白の調整で長時間の読書もしやすく、しおりや検索も活かせます。"
+            )
+        elif ebook_tone == "otherbooks":
+            nobonus = (
+                "デジタル配信なら、購入後すぐに端末で参照を始められます。"
+                "検索やブックマークで必要箇所へ戻りやすく、業務・学習の横の相棒に向きます。"
+            )
+        else:
+            nobonus = (
                 "デジタル配信なら、購入後すぐに手元の端末で高画質のまま楽しめます。"
                 "拡大しながら質感や表情の細部まで味わえるのも大きな利点です。"
             )
-            + "</p>"
-        )
+        parts.append("<p>" + esc(nobonus) + "</p>")
     if price:
+        genre_phrase = (
+            _price_line_genre_phrase(ebook_tone)
+            if _item_str(item.get("service")).lower() == "ebook"
+            else _price_line_genre_phrase("default")
+        )
         parts.append(
             "<p>"
             + esc(
-                f"価格は {price} と写真集としては標準的ながら、"
+                f"価格は {price} と{genre_phrase}標準的ながら、"
                 "上記の体験価値を考えると納得感が出やすい帯です。"
             )
             + "</p>"
         )
 
     parts.append("<h2>デジタル版なら「今すぐ読める」</h2>")
-    parts.append(
-        "<p>"
-        + esc(
+    if ebook_tone in ("comic", "novel", "otherbooks"):
+        now_read = (
+            "DMMの電子版なら、購入後は待ち時間ほぼゼロで、数十秒以内にスマホやタブレットで読み始められます。"
+            "「今この気分で読みたい」にそのまま応えられるスピード感が、デジタルならではのベネフィットです。"
+        )
+    else:
+        now_read = (
             "DMMの電子版なら、購入後は待ち時間ほぼゼロで、数十秒以内にスマホやタブレットで読み始められます。"
             "「今この気分で見たい」にそのまま応えられるスピード感が、デジタルならではのベネフィットです。"
         )
-        + "</p>"
-    )
+    parts.append("<p>" + esc(now_read) + "</p>")
     sample_href = _item_str(affiliate_url) or _item_str(item.get("item_url"))
     if sample_href:
         uq = esc(sample_href, quote=True)
+        if ebook_tone == "novel":
+            sample_tail = (
+                "で、無料で試し読みできる範囲をチェックしてみてください。"
+                "文体やテンポの相性を、短時間で判断しやすくなります。"
+            )
+        elif ebook_tone == "comic":
+            sample_tail = (
+                "で、無料で読めるサンプル範囲をチェックしてみてください。"
+                "画風とコマ運びの相性を、短時間で判断しやすくなります。"
+            )
+        elif ebook_tone == "otherbooks":
+            sample_tail = (
+                "で、無料で見られるサンプル範囲をチェックしてみてください。"
+                "章立てと説明のトーンが自分に合うか、すぐに判断しやすくなります。"
+            )
+        else:
+            sample_tail = (
+                "で、無料で見られるサンプル画像をチェックしてみてください。"
+                "中身のトーンが自分に合うか、一瞬で判断しやすくなります。"
+            )
         parts.append(
             "<p>まずは"
             f'<a href="{uq}" rel="nofollow sponsored">'
             + esc("公式の作品ページ")
             + "</a>"
-            + esc(
-                "で、無料で見られるサンプル画像をチェックしてみてください。"
-                "中身のトーンが自分に合うか、一瞬で判断しやすくなります。"
-            )
+            + esc(sample_tail)
             + "</p>"
         )
 
@@ -995,10 +1260,19 @@ def _editorial_article_sections_html(
                 extra = (
                     "これまでの歩みを振り返りつつ、最新の輝きを手元に残したい方。"
                 )
+            elif "コミック" in rl or "マンガ" in rl:
+                extra = "画風とテンポの両方を試し読みで確かめたい方。"
+            elif "小説" in rl or "文芸" in rl or "ラノベ" in rl:
+                extra = "文体の相性を冒頭で確かめ、長めの読書にも備えたい方。"
+            elif "ビジネス" in rl or "実用" in rl or "資格" in rl:
+                extra = "業務や学習の参照として、必要箇所へすぐ戻りたい方。"
             elif "新規" in rl or "初心者" in rl:
                 extra = "入り口として負担が少なく、世界観を一気に味わえる方。"
             elif "画質" in rl or "高画質" in rl:
-                extra = "拡大表示で質感や表情の細部までじっくり見比べたい方。"
+                if ebook_tone in ("comic", "novel", "otherbooks"):
+                    extra = "画面の解像度や文字の鮮明さまで気にして選びたい方。"
+                else:
+                    extra = "拡大表示で質感や表情の細部までじっくり見比べたい方。"
             else:
                 extra = "本作のテンションと相性が良さそうな方。"
             parts.append(
