@@ -2,12 +2,12 @@ name: Post to Twitter (DMM X Bot)
 
 on:
   schedule:
-    - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
-    - cron: '0 12 * * *' # 毎日 UTC12時（JST 21時）
-    - cron: '0 13 * * *' # 毎日 UTC13時（JST 22時）
-    - cron: '0 14 * * *' # 毎日 UTC14時（JST 23時）
-    - cron: '0 3 * * *' # 毎日 UTC3時（JST 12時）
-    - cron: '0 22 * * *' # 毎日 UTC22時（JST 翌7時）
+    - cron: '0 11 * 1 *' # 毎日 UTC11時（JST 20時）
+    - cron: '0 12 * 1 *' # 毎日 UTC12時（JST 21時）
+    - cron: '0 13 * 1 *' # 毎日 UTC13時（JST 22時）
+    - cron: '0 14 * 1 *' # 毎日 UTC14時（JST 23時）
+    - cron: '0 3 * 1 *' # 毎日 UTC3時（JST 12時）
+    - cron: '0 22 * 1 *' # 毎日 UTC22時（JST 翌7時）
   workflow_dispatch:
 
 jobs:
