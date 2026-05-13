@@ -30,10 +30,10 @@ def _table_name() -> str:
     return os.getenv("BLOG_ACCOUNT_MASTER_TABLE", DEFAULT_BLOG_ACCOUNT_TABLE)
 
 
-def _get_enabled_blog_row(account_id: str, platform: str) -> dict[str, Any] | None:
-    """enabled=true の行を最大1件返す（複数行ある場合は先頭）。
+def list_enabled_blog_rows(account_id: str, platform: str) -> list[dict[str, Any]]:
+    """enabled=true の行をすべて返す（blog_id 昇順）。
 
-    テーブル未作成（PGRST205）のときは None を返す（呼び出し側でエラー終了など）。
+    テーブル未作成（PGRST205）のときは空リストを返す。
     """
     try:
         logger.info(f"account_id: {account_id}, platform: {platform}")
@@ -44,7 +44,7 @@ def _get_enabled_blog_row(account_id: str, platform: str) -> dict[str, Any] | No
             .eq("account_id", account_id)
             .eq("platform", platform)
             .eq("enabled", True)
-            .limit(1)
+            .order("blog_id")
             .execute()
         )
     except Exception as e:
@@ -55,11 +55,18 @@ def _get_enabled_blog_row(account_id: str, platform: str) -> dict[str, Any] | No
                 _table_name(),
                 e,
             )
-            return None
+            return []
         raise
-    if not res.data:
-        return None
-    return res.data[0]
+    return list(res.data or [])
+
+
+def _get_enabled_blog_row(account_id: str, platform: str) -> dict[str, Any] | None:
+    """enabled=true の行を最大1件返す（複数行ある場合は先頭）。
+
+    テーブル未作成（PGRST205）のときは None を返す（呼び出し側でエラー終了など）。
+    """
+    rows = list_enabled_blog_rows(account_id, platform)
+    return rows[0] if rows else None
 
 
 def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
@@ -98,22 +105,8 @@ def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
     return out
 
 
-def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
-    """ライブドア AtomPub 用の接続情報をマスタから取得する。
-
-    platform = 'livedoor', enabled = true の行を参照する。
-    blog_id は AtomPub のブログ名（/atompub/ と /article の間。例: …/atompub/staff/article なら staff）。
-
-    trn_dmm_item_blog_post_status 用のキーは常に livedoor:{blog_id}（マスタの blog_key 列は参照しない）。
-    blog_memo / blog_key / post_key 列は備考（人間可読なブログ名など）のみ。ログ用。
-
-    任意カラム atompub_basic_username: Basic 認証ユーザー名（401 時に blog_id と同じにする等）。
-    任意 site, service, floor: マスタ側の既定（config の targets が空のとき 1 件分のキュー指定に使用）。
-    """
-    row = _get_enabled_blog_row(account_id, "livedoor")
-    if not row:
-        return None
-
+def _livedoor_row_to_config(row: dict[str, Any]) -> dict[str, str] | None:
+    """1行分を AtomPub 用フラット dict に変換。必須欠けなら None。"""
     blog_id = _pick(row, "blog_id", "livedoor_blog_name")
     username = _pick(row, "username", "livedoor_id")
     password = _pick(row, "api_password", "atompub_password")
@@ -139,6 +132,38 @@ def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
         if v:
             out[k] = v
     return out
+
+
+def list_enabled_livedoor_blog_configs(account_id: str) -> list[dict[str, str]]:
+    """platform=livedoor, enabled=true の行をすべて返す（blog_id 昇順）。
+
+    各行に site / service / floor があれば、main_livedoor_atompub がその組み合わせで
+    未投稿キューを参照するのに使う。必須列欠けの行はスキップする。
+    """
+    out: list[dict[str, str]] = []
+    for row in list_enabled_blog_rows(account_id, "livedoor"):
+        cfg = _livedoor_row_to_config(row)
+        if cfg:
+            out.append(cfg)
+    return out
+
+
+def get_enabled_livedoor_blog_config(account_id: str) -> dict[str, str] | None:
+    """ライブドア AtomPub 用の接続情報をマスタから取得する（有効行が複数あるときは先頭）。
+
+    platform = 'livedoor', enabled = true の行を参照する。
+    blog_id は AtomPub のブログ名（/atompub/ と /article の間。例: …/atompub/staff/article なら staff）。
+
+    trn_dmm_item_blog_post_status 用のキーは常に livedoor:{blog_id}（マスタの blog_key 列は参照しない）。
+    blog_memo / blog_key / post_key 列は備考（人間可読なブログ名など）のみ。ログ用。
+
+    任意カラム atompub_basic_username: Basic 認証ユーザー名（401 時に blog_id と同じにする等）。
+    任意 site, service, floor: マスタ側の既定（config の targets が空のとき 1 件分のキュー指定に使用）。
+
+    複数ブログを使う場合は list_enabled_livedoor_blog_configs を参照。
+    """
+    rows = list_enabled_livedoor_blog_configs(account_id)
+    return rows[0] if rows else None
 
 
 def apply_livedoor_env_from_config(cfg: dict[str, str]) -> None:

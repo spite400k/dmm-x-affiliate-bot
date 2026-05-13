@@ -5,6 +5,22 @@ from __future__ import annotations
 from typing import Any
 
 
+def normalize_portal_site(site: str | None, *, fallback: str = "fanza") -> str:
+    """ポータル URL 判定用に site 表記を dmm / fanza に揃える。
+
+    マスタに \"DMM.com\" 等が入っていても dmm 扱いにする。
+    """
+    s = str(site or "").strip().lower().replace(" ", "")
+    if s in ("dmm", "dmm.com", "dmmcom", "www.dmm.com"):
+        return "dmm"
+    if s in ("fanza",):
+        return "fanza"
+    if not s:
+        fb = str(fallback or "").strip().lower() or "fanza"
+        return normalize_portal_site(fb, fallback="fanza")
+    return "fanza"
+
+
 def resolve_post_targets(
     acc_cfg: dict[str, Any],
     master: dict[str, str] | None,
@@ -15,14 +31,15 @@ def resolve_post_targets(
       1. acc_cfg[\"targets\"] が空でなければその各要素（各要素に site があれば優先）
       2. それ以外で master に service と floor があれば 1 件だけ
 
-    site の既定: master[\"site\"] → acc_cfg[\"site\"] → \"fanza\"
+    site の既定: master[\"site\"] → acc_cfg[\"site\"] → \"fanza\"（いずれもポータル判定前に正規化）
     """
     master = master or {}
-    default_site = (
+    default_site_raw = (
         str(master.get("site") or "").strip()
         or str(acc_cfg.get("site") or "").strip()
         or "fanza"
     )
+    default_site = normalize_portal_site(default_site_raw)
     raw = acc_cfg.get("targets") or []
     out: list[dict[str, str]] = []
     if raw:
@@ -33,7 +50,10 @@ def resolve_post_targets(
             floor = str(t.get("floor") or "").strip()
             if not service or not floor:
                 continue
-            site = str(t.get("site") or "").strip() or default_site
+            site = normalize_portal_site(
+                str(t.get("site") or "").strip(),
+                fallback=default_site,
+            )
             out.append({"service": service, "floor": floor, "site": site})
         return out
 

@@ -9,9 +9,10 @@
      （False ならログを出して終了コード 0）
   2) Supabase mst_blog_accounts を取得（platform=livedoor, enabled=true, account_id=--account）
      行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
-  3) BLOG_ACCOUNT_SETTINGS の targets（またはマスタの service/floor）で未投稿を取得し、
-     livedoor.blogcms.jp へ AtomPub POST（--all-targets で targets を順に試行。
-     DRY_RUN（--draft）時も全ターゲットを試し、最初の成功で打ち切らない）
+  3) mst_blog_accounts（platform=livedoor, enabled=true）の各行の site / service / floor に応じて
+     未投稿キューを取得し livedoor.blogcms.jp へ AtomPub POST。
+     行に service/floor が無い場合のみ、BLOG_ACCOUNT_SETTINGS の targets（または先頭行の service/floor）にフォールバック。
+     --all-targets で複数行を順に試行（DRY_RUN 時も全ターゲットを試し、最初の成功で打ち切らない）
 
 .env:
   SUPABASE_URL_{ACCOUNT}, SUPABASE_KEY_{ACCOUNT}（ACCOUNT は既定 1 → _1）
@@ -21,7 +22,7 @@
   python main_livedoor_atompub.py --service ebook --floor comic
   python main_livedoor_atompub.py --account 2 --service digital --floor videoa --draft
   python main_livedoor_atompub.py --account 1 --all-targets
-    … BLOG_ACCOUNT_SETTINGS の targets を順に試し、キューがあるものから1件ずつ投稿
+    … mst_blog_accounts の livedoor 行ごとの service/floor（なければ config targets）を順に試す
   python main_livedoor_atompub.py --manual "テスト" --body "<p>HTML</p>"
 
 手動デバッグをソースに直書きする場合:
@@ -55,7 +56,7 @@ load_dotenv()
 from config.blog_settings import BLOG_ACCOUNT_SETTINGS
 from db.blog_repository import (
     apply_livedoor_env_from_config,
-    get_enabled_livedoor_blog_config,
+    list_enabled_livedoor_blog_configs,
 )
 from db.post_repository import get_ai_review_summary, get_next_post, mark_post_as_posted
 from livedoor_blog.post import (
@@ -64,7 +65,7 @@ from livedoor_blog.post import (
     post_to_livedoor_blog,
 )
 from twitter_api.tweet_service import format_campaigns
-from utils.blog_targets import resolve_post_targets
+from utils.blog_targets import normalize_portal_site, resolve_post_targets
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,17 @@ def _dry_run() -> bool:
         "yes",
         "on",
     )
+
+
+def _livedoor_rows_with_service_floor(
+    ld_rows: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """mst_blog_accounts の site/service/floor が揃った行（投稿キュー用）。"""
+    out: list[dict[str, str]] = []
+    for c in ld_rows:
+        if str(c.get("service") or "").strip() and str(c.get("floor") or "").strip():
+            out.append(c)
+    return out
 
 
 def run_livedoor_one_item(
@@ -134,7 +146,8 @@ def run_livedoor_one_item(
     point = post.get("auto_point", "")
     campaigns = post.get("campaign") or []
 
-    if site == "dmm":
+    site_portal = normalize_portal_site(site, fallback="fanza")
+    if site_portal == "dmm":
         portal_url = f"https://dmmportal.jp/{service_pg}/{floor_pg}/{content_id}"
     else:
         portal_url = f"https://fanzaportal.com/{floor_pg}/{content_id}"
@@ -221,7 +234,10 @@ def main() -> None:
     parser.add_argument(
         "--all-targets",
         action="store_true",
-        help="BLOG_ACCOUNT_SETTINGS の targets（またはマスタの service/floor）を順に試し、キューがある組み合わせで投稿",
+        help=(
+            "mst_blog_accounts の livedoor 行ごと（各行の service/floor/site）を順に試し、"
+            "キューがある組み合わせで投稿。行に service/floor が無いときのみ config の targets を使用"
+        ),
     )
     mg = parser.add_mutually_exclusive_group()
     mg.add_argument("--body", dest="body", help="--manual 時の本文 HTML")
@@ -258,8 +274,8 @@ def main() -> None:
 
     # 2) mst_blog_accounts（ライブドア有効行）必須
     logger.info(f"args.account: {args.account}")
-    ld_cfg = get_enabled_livedoor_blog_config(args.account)
-    if not ld_cfg:
+    ld_rows = list_enabled_livedoor_blog_configs(args.account)
+    if not ld_rows:
         logger.error(
             "mst_blog_accounts から livedoor 行を取得できませんでした。"
             " account_id=%s, platform=livedoor, enabled=true の行と、"
@@ -269,22 +285,19 @@ def main() -> None:
         )
         sys.exit(1)
 
-    apply_livedoor_env_from_config(ld_cfg)
-    blog_key_for_status = ld_cfg["blog_key"]
-    blog_memo = str(ld_cfg.get("blog_memo") or "").strip()
-    if blog_memo:
+    for i, rowc in enumerate(ld_rows):
         logger.info(
-            "mst_blog_accounts 取得済み（blog_id=%s, 投稿済みキー=%s, 備考=%s）→ AtomPub 投稿へ",
-            ld_cfg["blog_id"],
-            blog_key_for_status,
-            blog_memo,
+            "mst_blog_accounts livedoor[%d] blog_id=%s service=%s floor=%s site=%s memo=%s",
+            i,
+            rowc.get("blog_id"),
+            rowc.get("service") or "",
+            rowc.get("floor") or "",
+            rowc.get("site") or "",
+            str(rowc.get("blog_memo") or "").strip(),
         )
-    else:
-        logger.info(
-            "mst_blog_accounts 取得済み（blog_id=%s, 投稿済みキー=%s）→ AtomPub 投稿へ",
-            ld_cfg["blog_id"],
-            blog_key_for_status,
-        )
+
+    apply_livedoor_env_from_config(ld_rows[0])
+    blog_key_for_status = ld_rows[0]["blog_key"]
 
     os.environ["LIVEDOOR_BLOG_ENABLED"] = "1"
     os.environ["LIVEDOOR_POST_METHOD"] = "atompub"
@@ -327,20 +340,57 @@ def main() -> None:
             )
 
         dry = _dry_run()
+        fallback_site_norm = normalize_portal_site(
+            str(acc_cfg.get("site") or "").strip(),
+            fallback="fanza",
+        )
+
         if args.all_targets:
-            targets_list = resolve_post_targets(acc_cfg, ld_cfg)
+            master_jobs = _livedoor_rows_with_service_floor(ld_rows)
+            if master_jobs:
+                any_done = False
+                for ld_cfg in master_jobs:
+                    apply_livedoor_env_from_config(ld_cfg)
+                    site = normalize_portal_site(
+                        ld_cfg.get("site"),
+                        fallback=fallback_site_norm,
+                    )
+                    logger.info(
+                        "ターゲット試行（mst_blog_accounts）: blog_id=%s service=%s floor=%s site=%s",
+                        ld_cfg.get("blog_id"),
+                        ld_cfg.get("service"),
+                        ld_cfg.get("floor"),
+                        site,
+                    )
+                    if run_livedoor_one_item(
+                        args.account,
+                        str(ld_cfg["service"]).strip(),
+                        str(ld_cfg["floor"]).strip(),
+                        site,
+                        ld_cfg["blog_key"],
+                        dry=dry,
+                        no_mark_posted=args.no_mark_posted,
+                    ):
+                        any_done = True
+                if not any_done:
+                    sys.exit(2)
+                return
+
+            apply_livedoor_env_from_config(ld_rows[0])
+            targets_list = resolve_post_targets(acc_cfg, ld_rows[0])
             if not targets_list:
                 logger.error(
                     "投稿ターゲットが解決できませんでした。"
-                    " BLOG_ACCOUNT_SETTINGS[%r][targets] を設定するか、mst_blog_accounts に "
-                    "service と floor を設定してください。",
+                    " mst_blog_accounts の livedoor 行に service と floor を入れるか、"
+                    " BLOG_ACCOUNT_SETTINGS[%r][targets] を設定してください。",
                     args.account,
                 )
                 sys.exit(2)
             any_done = False
+            bk0 = ld_rows[0]["blog_key"]
             for t in targets_list:
                 logger.info(
-                    "ターゲット試行: service=%s floor=%s site=%s",
+                    "ターゲット試行（config targets）: service=%s floor=%s site=%s",
                     t["service"],
                     t["floor"],
                     t["site"],
@@ -350,7 +400,7 @@ def main() -> None:
                     t["service"],
                     t["floor"],
                     t["site"],
-                    blog_key_for_status,
+                    bk0,
                     dry=dry,
                     no_mark_posted=args.no_mark_posted,
                 ):
@@ -359,16 +409,38 @@ def main() -> None:
                 sys.exit(2)
             return
 
-        site = (
-            str(ld_cfg.get("site") or "").strip()
-            or str(acc_cfg.get("site") or "fanza").strip()
+        rows_sf = _livedoor_rows_with_service_floor(ld_rows)
+        matches = [
+            c
+            for c in ld_rows
+            if str(c.get("service") or "").strip() == args.service
+            and str(c.get("floor") or "").strip() == args.floor
+        ]
+        if matches:
+            ld_cfg = matches[0]
+        elif rows_sf:
+            logger.error(
+                "mst_blog_accounts に service=%s floor=%s の livedoor 行がありません。"
+                " 登録済み: %s",
+                args.service,
+                args.floor,
+                [(c.get("blog_id"), c.get("service"), c.get("floor")) for c in rows_sf],
+            )
+            sys.exit(1)
+        else:
+            ld_cfg = ld_rows[0]
+
+        apply_livedoor_env_from_config(ld_cfg)
+        site = normalize_portal_site(
+            ld_cfg.get("site"),
+            fallback=fallback_site_norm,
         )
         ok = run_livedoor_one_item(
             args.account,
             args.service,
             args.floor,
             site,
-            blog_key_for_status,
+            ld_cfg["blog_key"],
             dry=dry,
             no_mark_posted=args.no_mark_posted,
         )

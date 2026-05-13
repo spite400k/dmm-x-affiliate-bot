@@ -8,8 +8,8 @@
 --   blog_key … 任意。備考用（人間可読なブログ名など）。投稿済みキーはアプリが livedoor:{blog_id} を使う
 --   blog_memo … blog_key の別名としても可（どちらかに備考を入れればログに出る）
 --   xmlrpc_url … ライブドアでは未使用（NULL でよい）
---   site … 任意。dmm / fanza（ポータルリンク・未投稿キュー参照の既定サイト）
---   service, floor … 任意。config の targets が空のとき、1 件分のキュー指定に使用
+--   site … 任意。dmm / fanza または DMM.com（ポータルリンク・未投稿キュー参照。ライブドアは行ごとに解決）
+--   service, floor … 任意。ライブドアは複数行のとき各行の組み合わせでキュー参照（無いときのみ config targets）
 --
 -- platform = 'fc2' のとき:
 --   xmlrpc_url … 未指定なら http://blog.fc2.com/xmlrpc.php（アプリ側デフォルト）
