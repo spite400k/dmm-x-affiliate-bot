@@ -25,7 +25,8 @@ Playwright:
 
 記事 HTML の体裁:
   LIVEDOOR_ARTICLE_STYLE=simple / popular いずれも本文は次の順:
-    ① review_digest（筆者レビュー）→ 立ち読み（PR）→ ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク。
+    ① review_digest（筆者レビュー）→ 立ち読み（PR）→ ②パッケージ画像 → サンプル動画（FANZA・あり時）
+    → ③サンプル画像 → ④ポータル（アフィリエイト）リンク。
   記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
@@ -772,6 +773,68 @@ def _sample_gallery_html(item: dict[str, Any], title: str) -> str:
         '<div class="sample-gallery" style="display:grid;gap:0.75rem;">'
         + "".join(figs)
         + "</div>"
+    )
+
+
+def _is_fanza_item_row(item_row: dict[str, Any]) -> bool:
+    site = _item_str(item_row.get("site")).upper().replace(" ", "")
+    return site == "FANZA" or site.startswith("FANZA")
+
+
+def _sample_movie_url_from_item(item_row: dict[str, Any]) -> str:
+    """FANZA サンプル動画（litevideo）URL。列 → raw_json.sampleMovieURL の順。"""
+    u = _item_str(item_row.get("sample_movie_url"))
+    if u:
+        return u
+    raw = item_row.get("raw_json")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return ""
+    if not isinstance(raw, dict):
+        return ""
+    sm = raw.get("sampleMovieURL")
+    if not isinstance(sm, dict):
+        return ""
+    for key in ("size_720_480", "size_644_414", "size_560_360", "size_476_306"):
+        v = _item_str(sm.get(key))
+        if v:
+            return v
+    for val in sm.values():
+        if isinstance(val, str) and "litevideo" in val:
+            s = val.strip()
+            if s:
+                return s
+    return ""
+
+
+def _sample_movie_section_html(
+    item_row: dict[str, Any] | None, title: str
+) -> str:
+    """FANZA かつサンプル動画 URL があるとき、litevideo プレイヤーを埋め込む。"""
+    if not item_row or not _is_fanza_item_row(item_row):
+        return ""
+    movie_url = _sample_movie_url_from_item(item_row)
+    if not movie_url:
+        return ""
+    esc = html_module.escape
+    src = esc(movie_url, quote=True)
+    alt = esc(title)[:120] if title.strip() else "サンプル動画"
+    return (
+        "<h2>サンプル動画</h2>\n"
+        '<div class="ld-sample-movie" style="margin:0.75rem 0;max-width:100%;">'
+        '<div style="max-width:720px;margin:0 auto;">'
+        f'<iframe src="{src}" width="100%" height="405" '
+        f'title="{alt}（PR）" loading="lazy" '
+        'style="border:0;display:block;max-width:100%;" '
+        'allow="autoplay; encrypted-media" allowfullscreen></iframe>'
+        "</div>"
+        '<p style="margin:0.5rem 0 0;font-size:0.9em;">'
+        f'<a href="{src}" rel="nofollow sponsored" target="_blank" '
+        'referrerpolicy="no-referrer-when-downgrade">'
+        "サンプル動画を別ウィンドウで見る（PR）</a></p>"
+        "</div>"
     )
 
 
@@ -1887,7 +1950,7 @@ def _build_digest_sample_affiliate_body(
     review_fallback: str = "",
     campaigns: list | None = None,
 ) -> str:
-    """本文コア: ①筆者レビュー → 立ち読み → ②パッケージ画像 → ③サンプル → ④アフィリエイト。"""
+    """本文コア: ①筆者レビュー → 立ち読み → ②パッケージ → サンプル動画(FANZA) → ③画像 → ④CTA。"""
     if campaigns is None and item_row:
         raw_c = item_row.get("campaign")
         campaigns = raw_c if isinstance(raw_c, list) else []
@@ -1911,6 +1974,9 @@ def _build_digest_sample_affiliate_body(
     )
     if package:
         parts.append(package)
+    sample_movie = _sample_movie_section_html(item_row, title)
+    if sample_movie:
+        parts.append(sample_movie)
     sample = _sample_images_section_html(item_row, title)
     if sample:
         parts.append(sample)
