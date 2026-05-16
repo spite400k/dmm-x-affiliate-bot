@@ -15,6 +15,39 @@ def _is_missing_table_error(exc: BaseException) -> bool:
     return "PGRST205" in text or "Could not find the table" in text
 
 
+def _review_digest_nonempty(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    return bool(str(row.get("review_digest") or "").strip())
+
+
+def _content_ids_with_review_digest(
+    account_id: str, content_ids: list[str]
+) -> set[str]:
+    """review_digest が空でない content_id の集合。"""
+    ids = [cid.strip() for cid in content_ids if (cid or "").strip()]
+    if not ids:
+        return set()
+    supabase = init_supabase(account_id)
+    try:
+        res = (
+            supabase.table(_AI_REVIEW_TABLE)
+            .select("content_id, review_digest")
+            .in_("content_id", ids)
+            .execute()
+        )
+    except Exception as e:
+        if _is_missing_table_error(e):
+            return set()
+        raise
+    out: set[str] = set()
+    for row in res.data or []:
+        cid = str(row.get("content_id") or "").strip()
+        if cid and _review_digest_nonempty(row):
+            out.add(cid)
+    return out
+
+
 def get_ai_review_summary(account_id: str, content_id: str) -> dict[str, Any] | None:
     """content_id に対応する dmm_ai_review_summaries を1件返す。行が無い・テーブル無しは None。"""
     cid = (content_id or "").strip()
@@ -88,6 +121,49 @@ def get_next_post(service: str, floor: str, account_id: str, blog_key: str | Non
         for row in rows:
             if row["id"] not in posted_set:
                 return row
+        offset += _BATCH
+
+
+def get_next_livedoor_post(
+    service: str, floor: str, account_id: str, blog_key: str
+) -> dict[str, Any] | None:
+    """未投稿かつ dmm_ai_review_summaries.review_digest がある作品を1件返す。"""
+    supabase = init_supabase(account_id)
+    offset = 0
+    while True:
+        res = (
+            supabase.table("trn_dmm_items")
+            .select("*")
+            .eq("service", service)
+            .eq("floor", floor)
+            .gt("review_count", 0)
+            .order("review_count", desc=True)
+            .range(offset, offset + _BATCH - 1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return None
+        ids = [r["id"] for r in rows]
+        posted = (
+            supabase.table(_STATUS_TABLE)
+            .select("dmm_item_id")
+            .eq("blog_key", blog_key)
+            .eq("is_posted", True)
+            .in_("dmm_item_id", ids)
+            .execute()
+        )
+        posted_set = {r["dmm_item_id"] for r in (posted.data or [])}
+        candidates = [r for r in rows if r["id"] not in posted_set]
+        if candidates:
+            digest_ids = _content_ids_with_review_digest(
+                account_id,
+                [str(r.get("content_id") or "") for r in candidates],
+            )
+            for row in candidates:
+                cid = str(row.get("content_id") or "").strip()
+                if cid in digest_ids:
+                    return row
         offset += _BATCH
 
 

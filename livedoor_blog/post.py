@@ -25,7 +25,7 @@ Playwright:
 
 記事 HTML の体裁:
   LIVEDOOR_ARTICLE_STYLE=simple / popular いずれも本文は次の順:
-    ① review_digest（筆者レビュー）→ ②サンプル画像 → ③ポータル（アフィリエイト）リンク。
+    ① review_digest（筆者レビュー）→ ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク。
   記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
@@ -39,6 +39,7 @@ import logging
 import os
 import re
 import unicodedata
+from datetime import datetime, timezone
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
 
@@ -172,6 +173,166 @@ def _format_price_yen(n: object) -> str:
         return f"¥{int(n):,}"
     except (TypeError, ValueError):
         return ""
+
+
+def _price_int(n: object) -> int | None:
+    if n is None:
+        return None
+    try:
+        return int(n)
+    except (TypeError, ValueError):
+        return None
+
+
+_POINT_RETURN_KEYWORDS = (
+    "ポイント還元",
+    "ポイントアップ",
+    "ボーナスポイント",
+    "ポイント付与",
+    "ポイントプレゼント",
+    "ポイント最大",
+    "ポイント10",
+    "ポイント20",
+    "ポイント30",
+    "ポイント50",
+)
+
+
+def _campaign_deadline_label(date_end: object) -> str:
+    if not date_end:
+        return ""
+    try:
+        dt_end = datetime.strptime(str(date_end), "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
+        days_left = (dt_end - datetime.now(timezone.utc)).days
+        if days_left < 0:
+            return "終了しました"
+        if days_left == 0:
+            return "今日まで！"
+        return f"あと{days_left}日！"
+    except Exception:
+        return str(date_end)
+
+
+def _campaign_title(c: object) -> str:
+    if isinstance(c, dict):
+        return _item_str(c.get("title"))
+    return ""
+
+
+def _campaign_mentions_point_return(title: str) -> bool:
+    t = title or ""
+    return any(k in t for k in _POINT_RETURN_KEYWORDS)
+
+
+def _price_promo_html(item_row: dict[str, Any] | None) -> str:
+    """定価より安い場合の価格表示。"""
+    if not item_row:
+        return ""
+    price_n = _price_int(item_row.get("price"))
+    list_n = _price_int(item_row.get("list_price"))
+    if price_n is None:
+        return ""
+    esc = html_module.escape
+    price_s = esc(_format_price_yen(price_n))
+    if list_n is not None and list_n > price_n:
+        list_s = esc(_format_price_yen(list_n))
+        pct = round((1 - price_n / list_n) * 100)
+        off = esc(f"{pct}%OFF") if pct > 0 else ""
+        off_badge = (
+            f'<span style="display:inline-block;margin-left:0.5em;padding:0.15em 0.55em;'
+            f'font-size:0.82em;font-weight:bold;color:#fff;background:#c62828;'
+            f'border-radius:4px;">{off}</span>'
+            if off
+            else ""
+        )
+        return (
+            '<p class="ld-aff-price" style="margin:0 0 0.75rem;font-size:1.05em;line-height:1.5;">'
+            f'<strong style="font-size:1.35em;color:#c62828;">{price_s}</strong>'
+            f'<s style="margin-left:0.5em;color:#666;">定価 {list_s}</s>'
+            f"{off_badge}"
+            "</p>"
+        )
+    return (
+        '<p class="ld-aff-price" style="margin:0 0 0.75rem;font-size:1.05em;">'
+        f'<strong style="font-size:1.2em;color:#333;">{price_s}</strong>'
+        "</p>"
+    )
+
+
+def _campaigns_promo_html(campaigns: list | None) -> str:
+    """キャンペーン・ポイント還元のお得情報ブロック。"""
+    if not campaigns:
+        return ""
+    esc = html_module.escape
+    point_lines: list[str] = []
+    deal_items: list[str] = []
+    for c in campaigns:
+        if not isinstance(c, dict):
+            continue
+        title = _campaign_title(c)
+        if not title:
+            continue
+        status = _campaign_deadline_label(c.get("date_end"))
+        status_html = (
+            f' <span style="color:#c62828;font-weight:bold;">{esc(status)}</span>'
+            if status
+            else ""
+        )
+        li = (
+            f'<li style="margin:0.35rem 0;padding:0.35rem 0 0.35rem 0.25rem;'
+            f'border-bottom:1px dashed #f0c0c0;">'
+            f"🎉 {esc(title)}{status_html}</li>"
+        )
+        if _campaign_mentions_point_return(title):
+            point_lines.append(li)
+        else:
+            deal_items.append(li)
+    if not point_lines and not deal_items:
+        return ""
+    parts: list[str] = []
+    if point_lines:
+        parts.append(
+            '<div style="margin:0 0 0.75rem;padding:0.65rem 0.75rem;'
+            'background:#fff8e1;border-left:4px solid #ff9800;border-radius:4px;">'
+            '<p style="margin:0 0 0.35rem;font-weight:bold;color:#e65100;">'
+            "💰 ポイント還元・ボーナス</p>"
+            '<ul style="list-style:none;margin:0;padding:0;">'
+            + "".join(point_lines)
+            + "</ul></div>"
+        )
+    if deal_items:
+        parts.append(
+            '<div style="margin:0 0 0.75rem;padding:0.65rem 0.75rem;'
+            'background:#fff5f5;border-left:4px solid #c62828;border-radius:4px;">'
+            '<p style="margin:0 0 0.35rem;font-weight:bold;color:#b71c1c;">'
+            "🔥 開催中のキャンペーン</p>"
+            '<ul style="list-style:none;margin:0;padding:0;">'
+            + "".join(deal_items)
+            + "</ul></div>"
+        )
+    return "".join(parts)
+
+
+def _cta_button_html(href: str, label: str, *, primary: bool = False) -> str:
+    """目立つ CTA ボタン風リンク。"""
+    u = html_module.escape(href.strip(), quote=True)
+    t = html_module.escape(label)
+    if primary:
+        style = (
+            "display:block;margin:0.65rem 0;padding:0.85rem 1rem;"
+            "font-size:1.05em;font-weight:bold;text-align:center;text-decoration:none;"
+            "color:#fff;background:linear-gradient(180deg,#e53935 0%,#c62828 100%);"
+            "border-radius:8px;box-shadow:0 2px 6px rgba(198,40,40,0.35);"
+        )
+    else:
+        style = (
+            "display:block;margin:0.5rem 0;padding:0.65rem 1rem;"
+            "font-size:0.95em;font-weight:bold;text-align:center;text-decoration:none;"
+            "color:#c62828;background:#fff;border:2px solid #c62828;border-radius:8px;"
+        )
+    return f'<p style="margin:0;"><a href="{u}" rel="nofollow sponsored" style="{style}">{t}</a></p>'
 
 
 def _review_sentence(item: dict[str, Any]) -> str:
@@ -1337,25 +1498,45 @@ def _digest_author_review_html(digest_raw: str) -> str:
     return "\n".join(f"<p>{esc(p)}</p>" for p in paras)
 
 
-def _sample_images_section_html(
-    item_row: dict[str, Any] | None,
+def _package_image_section_html(
     title: str,
     *,
     image_large_url: str = "",
+    image_small_url: str = "",
+    item_row: dict[str, Any] | None = None,
 ) -> str:
-    """商品サンプル画像（gallery 優先、無ければ package 画像）。"""
+    """商品パッケージ画像（image_large_url 優先、無ければ image_small_url）。"""
+    pkg = ""
     if item_row:
-        gallery = _sample_gallery_html(item_row, title)
-        if gallery:
-            return gallery
-    if image_large_url.strip():
-        u = html_module.escape(image_large_url.strip(), quote=True)
-        alt = html_module.escape(title)[:120] if title.strip() else "サンプル画像"
-        return (
-            f'<p><img src="{u}" alt="{alt}" loading="lazy" '
-            'style="max-width:100%;height:auto;" /></p>'
+        pkg = _item_str(item_row.get("image_large_url")) or _item_str(
+            item_row.get("image_small_url")
         )
-    return ""
+    if not pkg:
+        pkg = image_large_url.strip() or image_small_url.strip()
+    if not pkg:
+        return ""
+    esc = html_module.escape
+    alt = esc(title)[:120] if title.strip() else "パッケージ画像"
+    u = esc(pkg, quote=True)
+    return (
+        "<h2>パッケージ画像</h2>\n"
+        f'<figure style="margin:0.5rem 0;">'
+        f'<img src="{u}" alt="{alt}" loading="lazy" '
+        'style="max-width:100%;height:auto;" /></figure>'
+    )
+
+
+def _sample_images_section_html(
+    item_row: dict[str, Any] | None,
+    title: str,
+) -> str:
+    """商品サンプル画像（sample_images のみ）。"""
+    if not item_row:
+        return ""
+    gallery = _sample_gallery_html(item_row, title)
+    if not gallery:
+        return ""
+    return "<h2>サンプル画像</h2>\n" + gallery
 
 
 def _affiliate_cta_section_html(
@@ -1363,29 +1544,71 @@ def _affiliate_cta_section_html(
     *,
     affiliate_url: str = "",
     item_row: dict[str, Any] | None = None,
+    campaigns: list | None = None,
 ) -> str:
-    """アフィリエイト誘導（ポータル・立ち読み）。"""
-    parts: list[str] = []
-    href = portal_url.strip() or affiliate_url.strip()
-    if href:
-        u = html_module.escape(href, quote=True)
-        parts.append(
-            f'<p><a href="{u}" rel="nofollow sponsored">'
-            "ポータルで内容チェック・関連作品を見る（PR）</a></p>"
+    """アフィリエイト誘導（価格・キャンペーン・目立つ CTA ボタン）。"""
+    buy_href = _item_str(affiliate_url)
+    if not buy_href and item_row:
+        buy_href = _item_str(item_row.get("affiliate_url")) or _item_str(
+            item_row.get("item_url")
         )
+    portal_href = portal_url.strip()
+    tachiyomi_href = ""
     if item_row:
-        tu = _item_str(item_row.get("tachiyomi_affiliate_url")) or _item_str(
+        tachiyomi_href = _item_str(item_row.get("tachiyomi_affiliate_url")) or _item_str(
             item_row.get("tachiyomi_url")
         )
-        if tu:
-            u = html_module.escape(tu, quote=True)
-            parts.append(
-                f'<p><a href="{u}" rel="nofollow sponsored">'
-                "内容をチラ見するならこちら（PR）</a></p>"
+
+    buttons: list[str] = []
+    if portal_href:
+        buttons.append(
+            _cta_button_html(
+                portal_href,
+                "▶ ポータルで作品詳細・関連作・ランキングを見る（PR）",
+                primary=True,
             )
-    if not parts:
+        )
+    if buy_href and buy_href != portal_href:
+        buttons.append(
+            _cta_button_html(
+                buy_href, "公式サイトで購入・詳細はこちら（PR）", primary=False
+            )
+        )
+    elif buy_href and not portal_href:
+        buttons.append(
+            _cta_button_html(
+                buy_href, "▶ 公式ページで詳細・購入はこちら（PR）", primary=True
+            )
+        )
+    if tachiyomi_href and tachiyomi_href not in (buy_href, portal_href):
+        buttons.append(
+            _cta_button_html(tachiyomi_href, "立ち読み・チラ見はこちら（PR）", primary=False)
+        )
+    if not buttons:
         return ""
-    return "<h2>購入・詳細はこちら（PR）</h2>\n" + "\n".join(parts)
+
+    inner: list[str] = []
+    price_block = _price_promo_html(item_row)
+    if price_block:
+        inner.append(price_block)
+    promo = _campaigns_promo_html(campaigns)
+    if promo:
+        inner.append(promo)
+    inner.extend(buttons)
+    inner.append(
+        '<p style="margin:0.75rem 0 0;font-size:0.8em;color:#666;">'
+        "※価格・キャンペーン内容は変更・終了する場合があります。最新情報は各ボタン先でご確認ください。"
+        "</p>"
+    )
+    box = (
+        '<div class="ld-aff-cta" style="margin:1.75rem 0;padding:1.25rem 1rem;'
+        'border:2px solid #c62828;border-radius:10px;background:linear-gradient(180deg,#fffafa 0%,#fff5f5 100%);">'
+        '<h2 style="margin:0 0 1rem;padding:0;font-size:1.2em;color:#b71c1c;text-align:center;">'
+        "🛒 ポータルでチェック・お得情報はこちら（PR）</h2>"
+        + "".join(inner)
+        + "</div>"
+    )
+    return box
 
 
 def _review_fallback_text(
@@ -1411,20 +1634,17 @@ def _build_digest_sample_affiliate_body(
     affiliate_url: str,
     portal_url: str,
     image_large_url: str,
+    image_small_url: str = "",
     item_row: dict[str, Any] | None,
     ai_review_row: dict[str, Any] | None,
     review_fallback: str = "",
+    campaigns: list | None = None,
 ) -> str:
-    """本文コア: ①筆者レビュー（digest_raw）→ ②サンプル画像 → ③アフィリエイト。"""
+    """本文コア: ①筆者レビュー → ②パッケージ画像 → ③サンプル画像 → ④アフィリエイト。"""
+    if campaigns is None and item_row:
+        raw_c = item_row.get("campaign")
+        campaigns = raw_c if isinstance(raw_c, list) else []
     parts: list[str] = []
-    logger.info(f"portal_url: {portal_url}")
-    logger.info(f"affiliate_url: {affiliate_url}")
-    logger.info(f"item_row: {item_row}")
-    logger.info(f"ai_review_row: {ai_review_row}")
-    logger.info(f"review_fallback: {review_fallback}")
-    logger.info(f"twitter_text: {twitter_text}")
-    logger.info(f"title: {title}")
-    logger.info(f"image_large_url: {image_large_url}")
     digest_raw = _digest_raw_from_ai_row(ai_review_row) or (review_fallback or "").strip()
     author = _digest_author_review_html(digest_raw)
     if author:
@@ -1433,13 +1653,22 @@ def _build_digest_sample_affiliate_body(
         for block in _twitter_blocks_without_title_echo(twitter_text, title):
             inner = html_module.escape(block).replace("\n", "<br />\n")
             parts.append(f"<p>{inner}</p>")
-    sample = _sample_images_section_html(
-        item_row, title, image_large_url=image_large_url
+    package = _package_image_section_html(
+        title,
+        image_large_url=image_large_url,
+        image_small_url=image_small_url,
+        item_row=item_row,
     )
+    if package:
+        parts.append(package)
+    sample = _sample_images_section_html(item_row, title)
     if sample:
         parts.append(sample)
     affiliate = _affiliate_cta_section_html(
-        portal_url, affiliate_url=affiliate_url, item_row=item_row
+        portal_url,
+        affiliate_url=affiliate_url,
+        item_row=item_row,
+        campaigns=campaigns,
     )
     if affiliate:
         parts.append(affiliate)
@@ -1475,8 +1704,10 @@ def _build_simple_livedoor_html(
     affiliate_url: str,
     portal_url: str,
     image_large_url: str,
+    image_small_url: str = "",
     item_row: dict[str, Any] | None,
     ai_review_row: dict[str, Any] | None,
+    campaigns: list | None = None,
 ) -> str:
     # タイトルは Atom <title> で既に表示されるため本文では繰り返さない
     return _build_digest_sample_affiliate_body(
@@ -1485,8 +1716,10 @@ def _build_simple_livedoor_html(
         affiliate_url=affiliate_url,
         portal_url=portal_url,
         image_large_url=image_large_url,
+        image_small_url=image_small_url,
         item_row=item_row,
         ai_review_row=ai_review_row,
+        campaigns=campaigns,
     )
 
 
@@ -1497,24 +1730,28 @@ def _build_popular_livedoor_html(
     affiliate_url: str,
     portal_url: str,
     image_large_url: str,
+    image_small_url: str = "",
     summary: str,
     point: str,
     comment: str,
     item_row: dict[str, Any] | None,
     ai_review_row: dict[str, Any] | None,
+    campaigns: list | None = None,
 ) -> str:
-    """digest_raw 筆者レビュー → サンプル画像 → アフィリエイト（PR 注記付き）。"""
+    """digest_raw 筆者レビュー → パッケージ画像 → サンプル画像 → アフィリエイト（PR 注記付き）。"""
     body = _build_digest_sample_affiliate_body(
         title=title,
         twitter_text=twitter_text,
         affiliate_url=affiliate_url,
         portal_url=portal_url,
         image_large_url=image_large_url,
+        image_small_url=image_small_url,
         item_row=item_row,
         ai_review_row=ai_review_row,
         review_fallback=_review_fallback_text(
             title, comment=comment, summary=summary, point=point
         ),
+        campaigns=campaigns,
     )
     return "\n".join(
         [
@@ -1534,9 +1771,11 @@ def build_livedoor_blog_html(
     affiliate_url: str,
     portal_url: str,
     image_large_url: str = "",
+    image_small_url: str = "",
     summary: str = "",
     point: str = "",
     comment: str = "",
+    campaigns: list | None = None,
     article_style: str | None = None,
     item_row: dict[str, Any] | None = None,
     ai_review_row: dict[str, Any] | None = None,
@@ -1550,11 +1789,13 @@ def build_livedoor_blog_html(
             affiliate_url=affiliate_url,
             portal_url=portal_url,
             image_large_url=image_large_url,
+            image_small_url=image_small_url,
             summary=summary,
             point=point,
             comment=comment,
             item_row=item_row,
             ai_review_row=ai_review_row,
+            campaigns=campaigns,
         )
     return _build_simple_livedoor_html(
         title=title,
@@ -1562,8 +1803,10 @@ def build_livedoor_blog_html(
         affiliate_url=affiliate_url,
         portal_url=portal_url,
         image_large_url=image_large_url,
+        image_small_url=image_small_url,
         item_row=item_row,
         ai_review_row=ai_review_row,
+        campaigns=campaigns,
     )
 
 

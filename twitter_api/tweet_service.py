@@ -36,26 +36,32 @@ logger = logging.getLogger(__name__)
 # ---------------------
 # キャンペーン整形
 # ---------------------
+def campaign_deadline_label(date_end: object) -> str:
+    """キャンペーン終了日時の表示ラベル（プレーンテキスト）。"""
+    if not date_end:
+        return ""
+    try:
+        dt_end = datetime.strptime(str(date_end), "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
+        days_left = (dt_end - datetime.now(timezone.utc)).days
+        if days_left < 0:
+            return "終了しました"
+        if days_left == 0:
+            return "今日まで！"
+        return f"あと{days_left}日！"
+    except Exception:
+        return str(date_end)
+
+
 def format_campaigns(campaigns: list | None) -> str:
     if not campaigns:
         return ""
-    now = datetime.now(timezone.utc)
     texts = []
     for c in campaigns:
         title = c.get("title")
-        date_end = c.get("date_end")
-        try:
-            dt_end = datetime.strptime(date_end, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-            days_left = (dt_end - now).days
-            if days_left < 0:
-                status = "終了しました"
-            elif days_left == 0:
-                status = "今日まで！"
-            else:
-                status = f"あと{days_left}日！"
-        except Exception:
-            status = f"{date_end}"
-        texts.append(f"🎉 {title} {status}")
+        status = campaign_deadline_label(c.get("date_end"))
+        texts.append(f"🎉 {title} {status}".strip())
     return "\n".join(texts)
 
 # ---------------------

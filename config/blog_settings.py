@@ -14,7 +14,7 @@ LIVEDOOR_BLOG_POST_KEY = (
 
 BLOG_ACCOUNT_SETTINGS = {
     "1": {
-        "enabled": True,
+        "enabled": False,
         "site": "dmm",
         "screen_name": "yuki23675786",
         "targets": [
@@ -25,7 +25,7 @@ BLOG_ACCOUNT_SETTINGS = {
         ],
     },
     "2": {
-        "enabled": False,
+        "enabled": True,
         "site": "fanza",
         "screen_name": "Ren47291",
         "targets": [

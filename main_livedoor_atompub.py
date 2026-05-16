@@ -2,7 +2,8 @@
 ライブドアブログへ AtomPub API で1件投稿するスタンドアロンスクリプト。
 
 既定: Supabase（trn_dmm_items）から、trn_dmm_item_blog_post_status（blog_key は livedoor:{blog_id} 固定）で
-未投稿の1件を取得し、dmm_ai_review_summaries（content_id 一致）があれば本文に取り込み、HTML を組み立てて AtomPub で投稿する。
+未投稿の1件を取得し、dmm_ai_review_summaries.review_digest がある作品のみ
+本文に取り込み、HTML を組み立てて AtomPub で投稿する。
 
 処理の順序:
   1) config.blog_settings.BLOG_ACCOUNT_SETTINGS[--account].enabled が True のときだけ続行
@@ -11,7 +12,7 @@
      行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
   3) mst_blog_accounts（platform=livedoor, enabled=true）の各行の site / service / floor に応じて
      未投稿キューを取得し livedoor.blogcms.jp へ AtomPub POST。
-     本文は ①review_digest（筆者レビュー）→ ②サンプル画像 → ③ポータル（アフィリエイト）リンク の順。
+     本文は ①review_digest → ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク の順。
      行に service/floor が無い場合のみ、BLOG_ACCOUNT_SETTINGS の targets（または先頭行の service/floor）にフォールバック。
      --all-targets で複数行を順に試行（DRY_RUN 時も全ターゲットを試し、最初の成功で打ち切らない）
 
@@ -59,7 +60,11 @@ from db.blog_repository import (
     apply_livedoor_env_from_config,
     list_enabled_livedoor_blog_configs,
 )
-from db.post_repository import get_ai_review_summary, get_next_post, mark_post_as_posted
+from db.post_repository import (
+    get_ai_review_summary,
+    get_next_livedoor_post,
+    mark_post_as_posted,
+)
 from livedoor_blog.post import (
     blog_post_title_for_item,
     build_livedoor_blog_html,
@@ -120,15 +125,15 @@ def run_livedoor_one_item(
     no_mark_posted: bool,
 ) -> bool:
     """Supabase から1件取り AtomPub 投稿する。投稿または DRY プレビューができれば True。"""
-    post = get_next_post(
+    post = get_next_livedoor_post(
         service,
         floor,
         account_id,
-        blog_key=blog_key_for_status,
+        blog_key_for_status,
     )
     if not post:
         logger.info(
-            "投稿対象なし: account=%s service=%s floor=%s",
+            "投稿対象なし（未投稿かつ review_digest あり）: account=%s service=%s floor=%s",
             account_id,
             service,
             floor,
@@ -155,6 +160,13 @@ def run_livedoor_one_item(
 
     title = post["title"]
     ai_review = get_ai_review_summary(account_id, content_id)
+    if not ai_review or not str(ai_review.get("review_digest") or "").strip():
+        logger.warning(
+            "review_digest なしのためスキップ: content_id=%s item_id=%s",
+            content_id,
+            item_id,
+        )
+        return False
     display_title = blog_post_title_for_item(title, post, ai_review)
     twitter_text = build_twitter_text(
         display_title,
@@ -169,10 +181,12 @@ def run_livedoor_one_item(
         twitter_text=twitter_text,
         affiliate_url=affiliate_url,
         portal_url=portal_url,
-        image_large_url=image_large_url or image_small_url,
+        image_large_url=image_large_url,
+        image_small_url=image_small_url,
         summary=summary,
         point=point,
         comment=comment,
+        campaigns=campaigns,
         item_row=post,
         ai_review_row=ai_review,
     )
