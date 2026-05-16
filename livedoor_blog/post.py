@@ -24,13 +24,11 @@ Playwright:
   必要に応じ LIVEDOOR_TITLE_SELECTOR / LIVEDOOR_BODY_SELECTOR で CSS を上書き。
 
 記事 HTML の体裁:
-  LIVEDOOR_ARTICLE_STYLE=simple（既定）…従来のフラットな段落。
-  LIVEDOOR_ARTICLE_STYLE=popular …リード・h2 見出し・末尾の
-    購入案内リストなど、読みやすい長文記事風（人気ブログの一般的な構成を参考）。
-    記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
-  build_livedoor_blog_html(item_row=…) に trn_dmm_items 相当の dict を渡すと、
-    ジャンル・出演・価格・スペック表・サンプル画像・立ち読みリンクなどを本文に展開する。
-  ai_review_row=… に dmm_ai_review_summaries 相当を渡すと、レビュー要旨・AIスコア・読者像・注意点を追記する。
+  LIVEDOOR_ARTICLE_STYLE=simple / popular いずれも本文は次の順:
+    ① review_digest（筆者レビュー）→ ②サンプル画像 → ③ポータル（アフィリエイト）リンク。
+  記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
+  build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
+  ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
 """
 
 from __future__ import annotations
@@ -531,45 +529,46 @@ def _trim_for_reader(
     return s[: max_chars - 1].rstrip() + "…"
 
 
+def _plain_text_paragraph_blocks(text: str) -> list[str]:
+    """平文を句点または単一改行で複数段落に分割。"""
+    t = text.strip()
+    if not t:
+        return []
+    if "\n" in t or "\r" in t:
+        t = t.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [ln.strip() for ln in t.split("\n") if ln.strip()]
+        if len(lines) > 1:
+            return lines
+        t = lines[0] if lines else t
+    segments = [s.strip() for s in t.split("。") if s.strip()]
+    if not segments:
+        return [t]
+    ends_period = t.rstrip().endswith("。")
+    chunks: list[str] = []
+    for i, seg in enumerate(segments):
+        if i < len(segments) - 1:
+            chunks.append(seg + "。")
+        elif ends_period:
+            chunks.append(seg + "。")
+        else:
+            chunks.append(seg)
+    return chunks if len(chunks) > 1 else [t]
+
+
 def _reader_voice_digest_to_blockquote_inner(quote: str, esc) -> str:
     """読者の声引用。blockquote 内は CMS が <br /> を落とすことがあるため改行は <p> の分割のみにする。"""
     q = quote.strip()
     if not q:
         return ""
 
-    def _p_blocks_from_plain(text: str) -> list[str]:
-        """1ブロックを句点または単一改行で複数 <p> に分割。"""
-        t = text.strip()
-        if not t:
-            return []
-        if "\n" in t or "\r" in t:
-            t = t.replace("\r\n", "\n").replace("\r", "\n")
-            lines = [ln.strip() for ln in t.split("\n") if ln.strip()]
-            if len(lines) > 1:
-                return lines
-            t = lines[0] if lines else t
-        segments = [s.strip() for s in t.split("。") if s.strip()]
-        if not segments:
-            return [t]
-        ends_period = t.rstrip().endswith("。")
-        chunks: list[str] = []
-        for i, seg in enumerate(segments):
-            if i < len(segments) - 1:
-                chunks.append(seg + "。")
-            elif ends_period:
-                chunks.append(seg + "。")
-            else:
-                chunks.append(seg)
-        return chunks if len(chunks) > 1 else [t]
-
     qn = q.replace("\r\n", "\n").replace("\r", "\n")
     lines_out: list[str] = []
     if "\n" in qn:
         for block in [b.strip() for b in qn.split("\n\n") if b.strip()]:
-            for piece in _p_blocks_from_plain(block):
+            for piece in _plain_text_paragraph_blocks(block):
                 lines_out.append("<p>" + esc(piece) + "</p>")
     else:
-        for piece in _p_blocks_from_plain(qn):
+        for piece in _plain_text_paragraph_blocks(qn):
             lines_out.append("<p>" + esc(piece) + "</p>")
     return "".join(lines_out)
 
@@ -668,7 +667,6 @@ def _item_rich_sections_html(item: dict[str, Any] | None, title: str) -> str:
         parts.append(specs)
     gallery = _sample_gallery_html(item, title)
     if gallery:
-        parts.append("<h2>サンプル画像</h2>")
         parts.append(gallery)
     return "\n".join(parts)
 
@@ -1318,6 +1316,136 @@ def _article_style(article_style: str | None) -> str:
     return raw if raw in ("simple", "popular") else "simple"
 
 
+def _digest_raw_from_ai_row(ai_review_row: dict[str, Any] | None) -> str:
+    return _item_str(ai_review_row.get("review_digest")) if ai_review_row else ""
+
+
+def _digest_author_review_html(digest_raw: str) -> str:
+    """review_digest（ユーザレビューまとめ）をそのまま筆者レビューとして出力。"""
+    text = (digest_raw or "").strip()
+    if not text:
+        return ""
+    esc = html_module.escape
+    qn = text.replace("\r\n", "\n").replace("\r", "\n")
+    paras: list[str] = []
+    if "\n" in qn:
+        for block in [b.strip() for b in qn.split("\n\n") if b.strip()]:
+            for piece in _plain_text_paragraph_blocks(block):
+                paras.append(piece)
+    else:
+        paras = _plain_text_paragraph_blocks(qn)
+    return "\n".join(f"<p>{esc(p)}</p>" for p in paras)
+
+
+def _sample_images_section_html(
+    item_row: dict[str, Any] | None,
+    title: str,
+    *,
+    image_large_url: str = "",
+) -> str:
+    """商品サンプル画像（gallery 優先、無ければ package 画像）。"""
+    if item_row:
+        gallery = _sample_gallery_html(item_row, title)
+        if gallery:
+            return gallery
+    if image_large_url.strip():
+        u = html_module.escape(image_large_url.strip(), quote=True)
+        alt = html_module.escape(title)[:120] if title.strip() else "サンプル画像"
+        return (
+            f'<p><img src="{u}" alt="{alt}" loading="lazy" '
+            'style="max-width:100%;height:auto;" /></p>'
+        )
+    return ""
+
+
+def _affiliate_cta_section_html(
+    portal_url: str,
+    *,
+    affiliate_url: str = "",
+    item_row: dict[str, Any] | None = None,
+) -> str:
+    """アフィリエイト誘導（ポータル・立ち読み）。"""
+    parts: list[str] = []
+    href = portal_url.strip() or affiliate_url.strip()
+    if href:
+        u = html_module.escape(href, quote=True)
+        parts.append(
+            f'<p><a href="{u}" rel="nofollow sponsored">'
+            "ポータルで内容チェック・関連作品を見る（PR）</a></p>"
+        )
+    if item_row:
+        tu = _item_str(item_row.get("tachiyomi_affiliate_url")) or _item_str(
+            item_row.get("tachiyomi_url")
+        )
+        if tu:
+            u = html_module.escape(tu, quote=True)
+            parts.append(
+                f'<p><a href="{u}" rel="nofollow sponsored">'
+                "内容をチラ見するならこちら（PR）</a></p>"
+            )
+    if not parts:
+        return ""
+    return "<h2>購入・詳細はこちら（PR）</h2>\n" + "\n".join(parts)
+
+
+def _review_fallback_text(
+    title: str,
+    *,
+    comment: str = "",
+    summary: str = "",
+    point: str = "",
+) -> str:
+    """digest が無いとき、auto_comment / summary / point から筆者レビュー相当を組み立てる。"""
+    chunks: list[str] = []
+    for text in (comment, summary, point):
+        t = (text or "").strip()
+        if t and _norm_title_for_dedupe(t) != _norm_title_for_dedupe(title):
+            chunks.append(t)
+    return "\n\n".join(chunks)
+
+
+def _build_digest_sample_affiliate_body(
+    *,
+    title: str,
+    twitter_text: str,
+    affiliate_url: str,
+    portal_url: str,
+    image_large_url: str,
+    item_row: dict[str, Any] | None,
+    ai_review_row: dict[str, Any] | None,
+    review_fallback: str = "",
+) -> str:
+    """本文コア: ①筆者レビュー（digest_raw）→ ②サンプル画像 → ③アフィリエイト。"""
+    parts: list[str] = []
+    logger.info(f"portal_url: {portal_url}")
+    logger.info(f"affiliate_url: {affiliate_url}")
+    logger.info(f"item_row: {item_row}")
+    logger.info(f"ai_review_row: {ai_review_row}")
+    logger.info(f"review_fallback: {review_fallback}")
+    logger.info(f"twitter_text: {twitter_text}")
+    logger.info(f"title: {title}")
+    logger.info(f"image_large_url: {image_large_url}")
+    digest_raw = _digest_raw_from_ai_row(ai_review_row) or (review_fallback or "").strip()
+    author = _digest_author_review_html(digest_raw)
+    if author:
+        parts.append(author)
+    else:
+        for block in _twitter_blocks_without_title_echo(twitter_text, title):
+            inner = html_module.escape(block).replace("\n", "<br />\n")
+            parts.append(f"<p>{inner}</p>")
+    sample = _sample_images_section_html(
+        item_row, title, image_large_url=image_large_url
+    )
+    if sample:
+        parts.append(sample)
+    affiliate = _affiliate_cta_section_html(
+        portal_url, affiliate_url=affiliate_url, item_row=item_row
+    )
+    if affiliate:
+        parts.append(affiliate)
+    return "\n".join(parts)
+
+
 def _norm_title_for_dedupe(s: str) -> str:
     """全角半角差・連続空白のゆらぎを吸収してタイトル同定に使う。"""
     t = unicodedata.normalize("NFKC", (s or "").strip())
@@ -1350,41 +1478,16 @@ def _build_simple_livedoor_html(
     item_row: dict[str, Any] | None,
     ai_review_row: dict[str, Any] | None,
 ) -> str:
-    parts: list[str] = []
     # タイトルは Atom <title> で既に表示されるため本文では繰り返さない
-    if image_large_url.strip():
-        u = html_module.escape(image_large_url.strip(), quote=True)
-        parts.append(f'<p><img src="{u}" alt="" loading="lazy" /></p>')
-    for block in _twitter_blocks_without_title_echo(twitter_text, title):
-        inner = html_module.escape(block).replace("\n", "<br />\n")
-        parts.append(f"<p>{inner}</p>")
-    canonical = (
-        _item_str(item_row.get("title")) if item_row else _item_str(title)
-    ) or title
-    editorial = _editorial_article_sections_html(
-        item_row, canonical, ai_review_row, affiliate_url, article_headline=title
+    return _build_digest_sample_affiliate_body(
+        title=title,
+        twitter_text=twitter_text,
+        affiliate_url=affiliate_url,
+        portal_url=portal_url,
+        image_large_url=image_large_url,
+        item_row=item_row,
+        ai_review_row=ai_review_row,
     )
-    if editorial:
-        parts.append(editorial)
-    if portal_url.strip():
-        u = html_module.escape(portal_url.strip(), quote=True)
-        parts.append(
-            f'<p><a href="{u}" rel="nofollow sponsored">ポータルで詳細を見る（PR）</a></p>'
-        )
-    if affiliate_url.strip():
-        u = html_module.escape(affiliate_url.strip(), quote=True)
-        parts.append(
-            f'<p><a href="{u}" rel="nofollow sponsored">公式サイト・購入はこちら（PR）</a></p>'
-        )
-    tu = _item_str(item_row.get("tachiyomi_affiliate_url")) if item_row else ""
-    if not tu and item_row:
-        tu = _item_str(item_row.get("tachiyomi_url"))
-    if tu:
-        u = html_module.escape(tu, quote=True)
-        parts.append(
-            f'<p><a href="{u}" rel="nofollow sponsored">内容をチラ見するならこちら（PR）</a></p>'
-        )
-    return "\n".join(parts)
 
 
 def _build_popular_livedoor_html(
@@ -1400,91 +1503,28 @@ def _build_popular_livedoor_html(
     item_row: dict[str, Any] | None,
     ai_review_row: dict[str, Any] | None,
 ) -> str:
-    """長文レビュー風＋末尾に公式誘導ブロック（PR）。"""
-    esc = html_module.escape
-    blocks = [b.strip() for b in twitter_text.split("\n\n") if b.strip()]
-    parts: list[str] = []
-    parts.append('<article class="ld-aff-post">')
-    # タイトルは Atom <title> で既に表示されるため本文では繰り返さない
-    if image_large_url.strip():
-        u = esc(image_large_url.strip(), quote=True)
-        # parts.append(
-        #     f'<figure class="hero"><img src="{u}" alt="{esc(title)}" loading="lazy" /></figure>'
-        # )
-    lead = (comment or "").strip()
-    if lead and _norm_title_for_dedupe(lead) != _norm_title_for_dedupe(title):
-        inner = esc(lead).replace("\n", "<br />\n")
-        parts.append(
-            '<p class="lead" style="font-size:105%;line-height:1.75;">'
-            f"<strong>{inner}</strong></p>"
-        )
-    if summary.strip() and _norm_title_for_dedupe(summary) != _norm_title_for_dedupe(
-        title
-    ):
-        parts.append("<h2>概要・あらすじ</h2>")
-        parts.append("<p>" + esc(summary.strip()).replace("\n", "<br />\n") + "</p>")
-    if point.strip() and _norm_title_for_dedupe(point) != _norm_title_for_dedupe(title):
-        parts.append("<h2>注目ポイント・推しどころ</h2>")
-        parts.append("<p>" + esc(point.strip()).replace("\n", "<br />\n") + "</p>")
-    canonical = (
-        _item_str(item_row.get("title")) if item_row else _item_str(title)
-    ) or title
-    editorial = _editorial_article_sections_html(
-        item_row, canonical, ai_review_row, affiliate_url, article_headline=title
+    """digest_raw 筆者レビュー → サンプル画像 → アフィリエイト（PR 注記付き）。"""
+    body = _build_digest_sample_affiliate_body(
+        title=title,
+        twitter_text=twitter_text,
+        affiliate_url=affiliate_url,
+        portal_url=portal_url,
+        image_large_url=image_large_url,
+        item_row=item_row,
+        ai_review_row=ai_review_row,
+        review_fallback=_review_fallback_text(
+            title, comment=comment, summary=summary, point=point
+        ),
     )
-    if editorial:
-        parts.append(editorial)
-    seen_norms: set[str] = {_norm_title_for_dedupe(title)}
-    if lead:
-        seen_norms.add(_norm_title_for_dedupe(lead))
-    if summary.strip():
-        seen_norms.add(_norm_title_for_dedupe(summary))
-    if point.strip():
-        seen_norms.add(_norm_title_for_dedupe(point))
-    if item_row:
-        for np in _narrative_paragraphs_from_item(item_row, title):
-            seen_norms.add(_norm_title_for_dedupe(np))
-    if ai_review_row:
-        ad = _item_str(ai_review_row.get("review_digest"))
-        if ad:
-            seen_norms.add(_norm_title_for_dedupe(ad))
-        ast = _item_str(ai_review_row.get("summary_text"))
-        if ast:
-            seen_norms.add(_norm_title_for_dedupe(ast))
-    extra = [
-        b
-        for b in blocks
-        if _norm_title_for_dedupe(b) not in seen_norms
-    ]
-    if extra:
-        parts.append("<h2>もう少し詳しく</h2>")
-        for b in extra:
-            parts.append("<p>" + esc(b).replace("\n", "<br />\n") + "</p>")
-    tachi_li = _tachiyomi_link_html(item_row) if item_row else ""
-    if portal_url.strip() or affiliate_url.strip() or tachi_li:
-        parts.append("<h2>詳細・購入のご案内（PR）</h2>")
-        parts.append("<ul>")
-        if portal_url.strip():
-            u = esc(portal_url.strip(), quote=True)
-            parts.append(
-                f'<li><a href="{u}" rel="nofollow sponsored">'
-                "ポータルで内容チェック・関連作品を見る</a></li>"
-            )
-        if affiliate_url.strip():
-            u = esc(affiliate_url.strip(), quote=True)
-            parts.append(
-                f'<li><a href="{u}" rel="nofollow sponsored">'
-                "公式ページの詳細・購入はこちら</a></li>"
-            )
-        if tachi_li:
-            parts.append(tachi_li)
-        parts.append("</ul>")
-    parts.append(
-        "<p><small>※本記事には広告・アフィリエイト（PR）リンクが含まれる場合があります。"
-        "</small></p>"
+    return "\n".join(
+        [
+            '<article class="ld-aff-post">',
+            body,
+            "<p><small>※本記事には広告・アフィリエイト（PR）リンクが含まれる場合があります。"
+            "</small></p>",
+            "</article>",
+        ]
     )
-    parts.append("</article>")
-    return "\n".join(parts)
 
 
 def build_livedoor_blog_html(

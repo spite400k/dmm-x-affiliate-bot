@@ -11,6 +11,7 @@
      行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
   3) mst_blog_accounts（platform=livedoor, enabled=true）の各行の site / service / floor に応じて
      未投稿キューを取得し livedoor.blogcms.jp へ AtomPub POST。
+     本文は ①review_digest（筆者レビュー）→ ②サンプル画像 → ③ポータル（アフィリエイト）リンク の順。
      行に service/floor が無い場合のみ、BLOG_ACCOUNT_SETTINGS の targets（または先頭行の service/floor）にフォールバック。
      --all-targets で複数行を順に試行（DRY_RUN 時も全ターゲットを試し、最初の成功で打ち切らない）
 
@@ -485,7 +486,7 @@ if __name__ == "__main__":
     # 例: ["--account", "1", "--service", "ebook", "--floor", "comic", "--draft"]
     # 例: ["--manual", "タイトル", "--body", "<p>HTML</p>"]
     # _argv_override: list[str] = ["--account", "1", "--service", "ebook", "--floor", "photo", "--draft"]
-    _argv_override: list[str] = ["--account", "1", "--all-targets"]
+    _argv_override: list[str] = ["--account", "2", "--all-targets"]
     if _argv_override:
         sys.argv = [sys.argv[0]] + _argv_override
     main()
