@@ -27,19 +27,19 @@ jobs:
 
       - name: Create .env file from secrets
         run: |
-          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL_1 }}" >> .env
-          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY_1 }}" >> .env
-          echo "SUPABASE_URL_1=${{ secrets.SUPABASE_URL_1 }}" >> .env
-          echo "SUPABASE_KEY_1=${{ secrets.SUPABASE_KEY_1 }}" >> .env
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL_2 }}" >> .env
+          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY_2 }}" >> .env
+          echo "SUPABASE_URL_2=${{ secrets.SUPABASE_URL_2 }}" >> .env
+          echo "SUPABASE_KEY_2=${{ secrets.SUPABASE_KEY_2 }}" >> .env
 
       - name: Run Livedoor AtomPub (targets ループ)
-        run: python main_livedoor_atompub.py --account 1 --all-targets
+        run: python main_livedoor_atompub.py --account 2 --all-targets
 
       - name: Upload debug artifacts
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: debug-artifacts-livedoor
+          name: debug-artifacts-livedoor-fanza
           path: |
             debug*.html
             debug*.png
