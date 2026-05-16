@@ -25,7 +25,7 @@ Playwright:
 
 記事 HTML の体裁:
   LIVEDOOR_ARTICLE_STYLE=simple / popular いずれも本文は次の順:
-    ① review_digest（筆者レビュー）→ ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク。
+    ① review_digest（筆者レビュー）→ 立ち読み（PR）→ ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク。
   記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
@@ -184,6 +184,223 @@ def _price_int(n: object) -> int | None:
         return None
 
 
+def _parse_price_value(n: object) -> int | None:
+    """API の '500~' などを含む価格文字列を整数円に変換。"""
+    s = _item_str(n)
+    if not s:
+        return None
+    s = s.replace("~", "").replace(",", "").strip()
+    if not s:
+        return None
+    try:
+        return int(float(s))
+    except (TypeError, ValueError):
+        return None
+
+
+# DMM API prices.deliveries.delivery[].type → 表示名（配信形式・画質）
+_DELIVERY_TYPE_LABEL_JA: dict[str, str] = {
+    "stream": "ストリーミング",
+    "download": "ダウンロード",
+    "hd": "HD（高画質）",
+    "8k": "8K",
+    "4k": "4K",
+    "iosdl": "iOSダウンロード",
+    "androiddl": "Androidダウンロード",
+}
+_DELIVERY_TYPE_SORT: dict[str, int] = {
+    "stream": 10,
+    "download": 20,
+    "hd": 30,
+    "4k": 40,
+    "8k": 50,
+    "iosdl": 60,
+    "androiddl": 70,
+}
+_DOWNLOAD_TYPE_CODES = frozenset({"download", "iosdl", "androiddl"})
+_4K_TYPE_CODES = frozenset({"4k", "8k"})
+
+
+def _delivery_type_label(type_code: str) -> str:
+    t = type_code.strip().lower()
+    return _DELIVERY_TYPE_LABEL_JA.get(t, type_code or "—")
+
+
+def _raw_prices_dict(item_row: dict[str, Any]) -> dict[str, Any] | None:
+    raw = item_row.get("raw_json")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    prices = raw.get("prices")
+    if isinstance(prices, str):
+        try:
+            prices = json.loads(prices)
+        except json.JSONDecodeError:
+            return None
+    return prices if isinstance(prices, dict) else None
+
+
+def _price_variants_raw_from_item(
+    item_row: dict[str, Any],
+) -> list[tuple[str, str, int, int | None]]:
+    """(type_code, 表示ラベル, 販売価格, 定価) のリスト（type ごと）。"""
+    variants: list[tuple[str, str, int, int | None]] = []
+    prices = _raw_prices_dict(item_row)
+    if prices:
+        deliveries = prices.get("deliveries")
+        if isinstance(deliveries, dict):
+            dlist = deliveries.get("delivery")
+            if isinstance(dlist, dict):
+                dlist = [dlist]
+            if isinstance(dlist, list):
+                for d in dlist:
+                    if not isinstance(d, dict):
+                        continue
+                    type_code = _item_str(d.get("type")).lower()
+                    price_n = _parse_price_value(d.get("price"))
+                    if price_n is None:
+                        continue
+                    list_n = _parse_price_value(d.get("list_price"))
+                    variants.append(
+                        (
+                            type_code,
+                            _delivery_type_label(type_code),
+                            price_n,
+                            list_n,
+                        )
+                    )
+    if variants:
+        seen: set[str] = set()
+        unique: list[tuple[str, str, int, int | None]] = []
+        for type_code, label, price_n, list_n in sorted(
+            variants, key=lambda x: (_DELIVERY_TYPE_SORT.get(x[0], 99), x[2])
+        ):
+            if type_code in seen:
+                continue
+            seen.add(type_code)
+            unique.append((type_code, label, price_n, list_n))
+        return unique
+
+    price_n = _parse_price_value(item_row.get("price"))
+    list_n = _parse_price_value(item_row.get("list_price"))
+    if price_n is None and prices:
+        price_n = _parse_price_value(prices.get("price"))
+    if list_n is None and prices:
+        list_n = _parse_price_value(prices.get("list_price"))
+    if price_n is None:
+        return []
+    delivery = _item_str(item_row.get("delivery"))
+    label = delivery if delivery else "販売価格"
+    return [("", label, price_n, list_n)]
+
+
+def _plan_summary_text(
+    type_codes: set[str], *, is_cheapest: bool, all_type_codes: set[str]
+) -> str:
+    """type の組み合わせからプラン内容の一文要約。"""
+    has_dl = bool(type_codes & _DOWNLOAD_TYPE_CODES)
+    has_stream = "stream" in type_codes
+    has_4k = bool(type_codes & _4K_TYPE_CODES)
+    has_hd = "hd" in type_codes
+    catalog_has_hd = "hd" in all_type_codes or bool(all_type_codes & _4K_TYPE_CODES)
+
+    if has_4k:
+        q = "8K" if "8k" in type_codes else "4K"
+        return (
+            f"最高画質（{q}）で、保存もネット再生も両方できる全部入り。"
+        )
+    if has_hd and has_stream and not has_dl:
+        if is_cheapest:
+            return (
+                "標準高画質（HD）だが、保存はできず"
+                "ネット接続時のみ再生できる最安プラン。"
+            )
+        return "標準高画質（HD）で、保存もネット再生も両方できるプラン。"
+    if has_hd and not has_stream and not has_dl:
+        return "標準高画質（HD）で、保存もネット再生も両方できるプラン。"
+    if has_hd:
+        return "標準高画質（HD）で、保存もネット再生も両方できるプラン。"
+    if has_stream and not has_dl:
+        if is_cheapest and catalog_has_hd:
+            return (
+                "標準高画質（HD）だが、保存はできず"
+                "ネット接続時のみ再生できる最安プラン。"
+            )
+        if is_cheapest:
+            return (
+                "保存はできずネット接続時のみ再生できる最安プラン。"
+            )
+        return "ネット接続時のみ再生できるストリーミングプラン。"
+    if has_dl and has_stream:
+        return "画質はそこそこで、保存もネット再生も両方できる節約プラン。"
+    if has_dl:
+        return "画質はそこそこで、保存もネット再生も両方できる節約プラン。"
+    return ""
+
+
+def _group_price_variants(
+    raw: list[tuple[str, str, int, int | None]],
+) -> list[tuple[str, int, int | None]]:
+    """(プランまとめ文, 販売価格, 定価)。同一価格の type は1プランにまとめる。"""
+    groups: dict[tuple[int, int | None], list[tuple[str, str]]] = {}
+    for type_code, label, price_n, list_n in raw:
+        groups.setdefault((price_n, list_n), []).append((type_code, label))
+    if not groups:
+        return []
+    min_price = min(k[0] for k in groups)
+    multi = len(groups) > 1
+    all_codes: set[str] = set()
+    for items in groups.values():
+        all_codes.update(code for code, _ in items)
+    out: list[tuple[str, int, int | None]] = []
+    for (price_n, list_n), items in sorted(
+        groups.items(), key=lambda x: x[0][0], reverse=True
+    ):
+        items.sort(key=lambda t: _DELIVERY_TYPE_SORT.get(t[0], 99))
+        codes = {code for code, _ in items}
+        is_cheapest = multi and price_n == min_price
+        summary = _plan_summary_text(
+            codes, is_cheapest=is_cheapest, all_type_codes=all_codes
+        )
+        if not summary:
+            summary = " / ".join(lab for _, lab in items)
+        plan_line = f"{_format_price_yen(price_n)}プラン：{summary}"
+        out.append((plan_line, price_n, list_n))
+    return out
+
+
+def _price_variants_from_item(
+    item_row: dict[str, Any],
+) -> list[tuple[str, int, int | None]]:
+    """(プランまとめ文, 販売価格, 定価)。"""
+    return _group_price_variants(_price_variants_raw_from_item(item_row))
+
+
+def _format_price_variant_line(
+    label: str, price_n: int, list_n: int | None, *, esc: Any = html_module.escape
+) -> str:
+    price_s = esc(_format_price_yen(price_n))
+    off_badge = ""
+    if list_n is not None and list_n > price_n:
+        list_s = esc(_format_price_yen(list_n))
+        pct = round((1 - price_n / list_n) * 100)
+        if pct > 0:
+            off_badge = (
+                f' <span style="font-size:0.82em;font-weight:bold;color:#fff;'
+                f'background:#c62828;padding:0.1em 0.45em;border-radius:4px;">'
+                f"{esc(f'{pct}%OFF')}</span>"
+            )
+        return (
+            f"<strong style='color:#c62828;'>{price_s}</strong>"
+            f" <s style='color:#666;font-size:0.92em;'>定価 {list_s}</s>{off_badge}"
+        )
+    return f"<strong style='color:#c62828;'>{price_s}</strong>"
+
+
 _POINT_RETURN_KEYWORDS = (
     "ポイント還元",
     "ポイントアップ",
@@ -227,37 +444,47 @@ def _campaign_mentions_point_return(title: str) -> bool:
 
 
 def _price_promo_html(item_row: dict[str, Any] | None) -> str:
-    """定価より安い場合の価格表示。"""
+    """配信形式・画質ごとの価格表示（複数プランは表、1件はシンプル表示）。"""
     if not item_row:
         return ""
-    price_n = _price_int(item_row.get("price"))
-    list_n = _price_int(item_row.get("list_price"))
-    if price_n is None:
+    variants = _price_variants_from_item(item_row)
+    if not variants:
         return ""
     esc = html_module.escape
-    price_s = esc(_format_price_yen(price_n))
-    if list_n is not None and list_n > price_n:
-        list_s = esc(_format_price_yen(list_n))
-        pct = round((1 - price_n / list_n) * 100)
-        off = esc(f"{pct}%OFF") if pct > 0 else ""
-        off_badge = (
-            f'<span style="display:inline-block;margin-left:0.5em;padding:0.15em 0.55em;'
-            f'font-size:0.82em;font-weight:bold;color:#fff;background:#c62828;'
-            f'border-radius:4px;">{off}</span>'
-            if off
-            else ""
-        )
+    if len(variants) == 1:
+        _, price_n, list_n = variants[0]
         return (
-            '<p class="ld-aff-price" style="margin:0 0 0.75rem;font-size:1.05em;line-height:1.5;">'
-            f'<strong style="font-size:1.35em;color:#c62828;">{price_s}</strong>'
-            f'<s style="margin-left:0.5em;color:#666;">定価 {list_s}</s>'
-            f"{off_badge}"
-            "</p>"
+            '<div class="ld-aff-price" style="margin:0 0 0.75rem;font-size:1.02em;line-height:1.5;">'
+            f'<p style="margin:0 0 0.25rem;font-weight:bold;color:#333;">{esc("価格")}</p>'
+            f'<p style="margin:0;">'
+            f"{_format_price_variant_line('', price_n, list_n, esc=esc)}</p>"
+            "</div>"
+        )
+    trs: list[str] = []
+    for label, price_n, list_n in variants:
+        trs.append(
+            "<tr>"
+            f'<td style="padding:0.45rem 0.5rem;border-bottom:1px solid #f0e0e0;'
+            f'vertical-align:top;line-height:1.5;">{esc(label)}</td>'
+            f'<td style="padding:0.45rem 0.5rem;border-bottom:1px solid #f0e0e0;'
+            f'text-align:right;white-space:nowrap;vertical-align:top;">'
+            f"{_format_price_variant_line(label, price_n, list_n, esc=esc)}</td>"
+            "</tr>"
         )
     return (
-        '<p class="ld-aff-price" style="margin:0 0 0.75rem;font-size:1.05em;">'
-        f'<strong style="font-size:1.2em;color:#333;">{price_s}</strong>'
-        "</p>"
+        '<div class="ld-aff-price" style="margin:0 0 0.75rem;font-size:1.02em;line-height:1.55;">'
+        f'<p style="margin:0 0 0.4rem;font-weight:bold;color:#333;">'
+        f'{esc("価格（プランにより異なります）")}</p>'
+        '<table class="ld-aff-price-table" style="width:100%;border-collapse:collapse;'
+        'font-size:0.95em;">'
+        "<thead><tr>"
+        '<th scope="col" style="text-align:left;padding:0.4rem 0.5rem;'
+        'border-bottom:2px solid #c62828;color:#b71c1c;">プラン</th>'
+        '<th scope="col" style="text-align:right;padding:0.4rem 0.5rem;'
+        'border-bottom:2px solid #c62828;color:#b71c1c;">価格</th>'
+        "</tr></thead><tbody>"
+        + "".join(trs)
+        + "</tbody></table></div>"
     )
 
 
@@ -476,10 +703,24 @@ def _item_specs_rows_html(item: dict[str, Any]) -> str:
     genres = _normalize_genres(item.get("genres"))
     if genres:
         rows.append(("ジャンル", "、".join(genres)))
-    price = _format_price_yen(item.get("price"))
-    lp = _format_price_yen(item.get("list_price"))
-    if price:
-        rows.append(("価格", f"{price}" + (f"（定価 {lp}）" if lp and lp != price else "")))
+    variants = _price_variants_from_item(item)
+    if variants:
+        if len(variants) == 1:
+            lab, pn, ln = variants[0]
+            line = _format_price_yen(pn)
+            if ln is not None and ln > pn:
+                line += f"（定価 {_format_price_yen(ln)}）"
+            if lab != "販売価格":
+                line = f"{lab}：{line}"
+        else:
+            parts = []
+            for lab, pn, ln in variants:
+                seg = f"{lab} {_format_price_yen(pn)}"
+                if ln is not None and ln > pn:
+                    seg += f"（定価 {_format_price_yen(ln)}）"
+                parts.append(seg)
+            line = " / ".join(parts)
+        rows.append(("価格", line))
     vol = _item_str(item.get("volume"))
     if vol:
         rows.append(("ボリューム", vol))
@@ -1498,6 +1739,22 @@ def _digest_author_review_html(digest_raw: str) -> str:
     return "\n".join(f"<p>{esc(p)}</p>" for p in paras)
 
 
+def _tachiyomi_section_html(item_row: dict[str, Any] | None) -> str:
+    """筆者レビュー直後用の立ち読み CTA。"""
+    if not item_row:
+        return ""
+    href = _item_str(item_row.get("tachiyomi_affiliate_url")) or _item_str(
+        item_row.get("tachiyomi_url")
+    )
+    if not href:
+        return ""
+    return (
+        '<div class="ld-tachiyomi-cta" style="margin:1.25rem 0 1.5rem;">'
+        + _cta_button_html(href, "立ち読み・チラ見はこちら（PR）", primary=False)
+        + "</div>"
+    )
+
+
 def _package_image_section_html(
     title: str,
     *,
@@ -1519,7 +1776,6 @@ def _package_image_section_html(
     alt = esc(title)[:120] if title.strip() else "パッケージ画像"
     u = esc(pkg, quote=True)
     return (
-        "<h2>パッケージ画像</h2>\n"
         f'<figure style="margin:0.5rem 0;">'
         f'<img src="{u}" alt="{alt}" loading="lazy" '
         'style="max-width:100%;height:auto;" /></figure>'
@@ -1553,11 +1809,6 @@ def _affiliate_cta_section_html(
             item_row.get("item_url")
         )
     portal_href = portal_url.strip()
-    tachiyomi_href = ""
-    if item_row:
-        tachiyomi_href = _item_str(item_row.get("tachiyomi_affiliate_url")) or _item_str(
-            item_row.get("tachiyomi_url")
-        )
 
     buttons: list[str] = []
     if portal_href:
@@ -1579,10 +1830,6 @@ def _affiliate_cta_section_html(
             _cta_button_html(
                 buy_href, "▶ 公式ページで詳細・購入はこちら（PR）", primary=True
             )
-        )
-    if tachiyomi_href and tachiyomi_href not in (buy_href, portal_href):
-        buttons.append(
-            _cta_button_html(tachiyomi_href, "立ち読み・チラ見はこちら（PR）", primary=False)
         )
     if not buttons:
         return ""
@@ -1640,7 +1887,7 @@ def _build_digest_sample_affiliate_body(
     review_fallback: str = "",
     campaigns: list | None = None,
 ) -> str:
-    """本文コア: ①筆者レビュー → ②パッケージ画像 → ③サンプル画像 → ④アフィリエイト。"""
+    """本文コア: ①筆者レビュー → 立ち読み → ②パッケージ画像 → ③サンプル → ④アフィリエイト。"""
     if campaigns is None and item_row:
         raw_c = item_row.get("campaign")
         campaigns = raw_c if isinstance(raw_c, list) else []
@@ -1653,6 +1900,9 @@ def _build_digest_sample_affiliate_body(
         for block in _twitter_blocks_without_title_echo(twitter_text, title):
             inner = html_module.escape(block).replace("\n", "<br />\n")
             parts.append(f"<p>{inner}</p>")
+    tachiyomi = _tachiyomi_section_html(item_row)
+    if tachiyomi:
+        parts.append(tachiyomi)
     package = _package_image_section_html(
         title,
         image_large_url=image_large_url,
