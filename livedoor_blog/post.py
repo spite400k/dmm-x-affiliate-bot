@@ -433,11 +433,24 @@ def _title_suggests_ebook_digital_bonus(title: str) -> bool:
     )
 
 
+def _credit_entry_name(entry: object) -> str:
+    if entry is None:
+        return ""
+    if isinstance(entry, dict):
+        n = entry.get("name")
+        return str(n).strip() if n is not None else ""
+    return str(entry).strip()
+
+
 def _parse_credit_names(val: object) -> list[str]:
     if val is None:
         return []
+    if isinstance(val, dict):
+        n = _credit_entry_name(val)
+        return [n] if n else []
     if isinstance(val, list):
-        return [str(x).strip() for x in val if str(x).strip()][:4]
+        names = [_credit_entry_name(x) for x in val]
+        return [n for n in names if n][:4]
     s = str(val).strip()
     if not s:
         return []
@@ -447,7 +460,11 @@ def _parse_credit_names(val: object) -> list[str]:
         except json.JSONDecodeError:
             return [s]
         if isinstance(parsed, list):
-            return [str(x).strip() for x in parsed if str(x).strip()][:4]
+            names = [_credit_entry_name(x) for x in parsed]
+            return [n for n in names if n][:4]
+        if isinstance(parsed, dict):
+            n = _credit_entry_name(parsed)
+            return [n] if n else []
     return [s]
 
 
