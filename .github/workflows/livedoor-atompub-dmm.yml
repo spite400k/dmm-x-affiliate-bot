@@ -1,4 +1,4 @@
-name: Livedoor blog (AtomPub)
+name: Livedoor blog (AtomPub) DMM
 
 on:
   schedule:
