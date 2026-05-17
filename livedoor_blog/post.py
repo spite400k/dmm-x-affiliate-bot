@@ -822,7 +822,6 @@ def _sample_movie_section_html(
     src = esc(movie_url, quote=True)
     alt = esc(title)[:120] if title.strip() else "サンプル動画"
     return (
-        "<h2>サンプル動画</h2>\n"
         '<div class="ld-sample-movie" style="margin:0.75rem 0;max-width:100%;">'
         '<div style="max-width:720px;margin:0 auto;">'
         f'<iframe src="{src}" width="100%" height="405" '
@@ -1855,7 +1854,7 @@ def _sample_images_section_html(
     gallery = _sample_gallery_html(item_row, title)
     if not gallery:
         return ""
-    return "<h2>サンプル画像</h2>\n" + gallery
+    return gallery
 
 
 def _affiliate_cta_section_html(
