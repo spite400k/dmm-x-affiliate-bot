@@ -500,7 +500,7 @@ if __name__ == "__main__":
     # 例: ["--account", "1", "--service", "ebook", "--floor", "comic", "--draft"]
     # 例: ["--manual", "タイトル", "--body", "<p>HTML</p>"]
     # _argv_override: list[str] = ["--account", "1", "--service", "ebook", "--floor", "photo", "--draft"]
-    # _argv_override: list[str] = ["--account", "2", "--all-targets"]
+    #_argv_override: list[str] = ["--account", "6", "--all-targets"]
     _argv_override: list[str] = []
     if _argv_override:
         sys.argv = [sys.argv[0]] + _argv_override

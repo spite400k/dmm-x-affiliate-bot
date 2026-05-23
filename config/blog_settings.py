@@ -62,4 +62,13 @@ BLOG_ACCOUNT_SETTINGS = {
             {"service": "ebook", "floor": "comic"},
         ],
     },
+    "6": {
+        "enabled": True,
+        "site": "fanza",
+        "screen_name": "Kai4708",
+        "targets": [
+            {"service": "doujin", "floor": "digital_doujin"},
+            {"service": "ebook", "floor": "comic"},
+        ],
+    },
 }
