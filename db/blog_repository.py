@@ -69,20 +69,8 @@ def _get_enabled_blog_row(account_id: str, platform: str) -> dict[str, Any] | No
     return rows[0] if rows else None
 
 
-def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
-    """FC2ブログ投稿用の接続情報をマスタテーブルから取得する。
-
-    必須カラム:
-      account_id, platform, enabled, blog_id, username, api_password
-    任意カラム:
-      blog_key, xmlrpc_url, site, service, floor（後者は targets 未設定時の 1 件指定用）
-
-    BLOG_ACCOUNT_MASTER_TABLE を指定するとテーブル名を変更できる。
-    """
-    row = _get_enabled_blog_row(account_id, "fc2")
-    if not row:
-        return None
-
+def _fc2_row_to_config(row: dict[str, Any], account_id: str) -> dict[str, str] | None:
+    """1行分を FC2 XML-RPC 用フラット dict に変換。必須欠けなら None。"""
     blog_id = _pick(row, "blog_id", "fc2_blog_id")
     username = _pick(row, "username", "login_id", "email")
     password = _pick(row, "api_password", "xmlrpc_password", "password")
@@ -103,6 +91,35 @@ def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
         if v:
             out[k] = v
     return out
+
+
+def list_enabled_fc2_blog_configs(account_id: str) -> list[dict[str, str]]:
+    """platform=fc2, enabled=true の行をすべて返す（blog_id 昇順）。
+
+    各行に site / service / floor があれば、main_fc2_blog がその組み合わせで
+    未投稿キューを参照するのに使う。必須列欠けの行はスキップする。
+    """
+    out: list[dict[str, str]] = []
+    for row in list_enabled_blog_rows(account_id, "fc2"):
+        cfg = _fc2_row_to_config(row, account_id)
+        if cfg:
+            out.append(cfg)
+    return out
+
+
+def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
+    """FC2ブログ投稿用の接続情報をマスタテーブルから取得する（有効行が複数あるときは先頭）。
+
+    必須カラム:
+      account_id, platform, enabled, blog_id, username, api_password
+    任意カラム:
+      blog_key, xmlrpc_url, site, service, floor（後者は targets 未設定時の 1 件指定用）
+
+    BLOG_ACCOUNT_MASTER_TABLE を指定するとテーブル名を変更できる。
+    複数ブログを使う場合は list_enabled_fc2_blog_configs を参照。
+    """
+    rows = list_enabled_fc2_blog_configs(account_id)
+    return rows[0] if rows else None
 
 
 def _livedoor_row_to_config(row: dict[str, Any]) -> dict[str, str] | None:
