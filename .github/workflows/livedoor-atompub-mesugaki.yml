@@ -33,7 +33,7 @@ jobs:
           echo "SUPABASE_KEY_3=${{ secrets.SUPABASE_KEY_3 }}" >> .env
 
       - name: Run Livedoor AtomPub (targets ループ)
-        run: python main_livedoor_atompub.py --account 3 --all-targets
+        run: python main_livedoor_atompub.py --account 6 --all-targets
 
       - name: Upload debug artifacts
         if: always()
