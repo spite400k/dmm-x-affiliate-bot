@@ -9,9 +9,6 @@ import requests
 import tweepy
 from twitter_api.safe_post import safe_post_tweet
 from twitter_api.twitter_client import get_clients
-from utils.get_sample_movie import get_video_from_supabase
-from utils.image import download_images
-from utils.get_tachiyomi import capture_all_tachiyomi_pages_from_supabase
 from datetime import datetime, timezone
 
 
