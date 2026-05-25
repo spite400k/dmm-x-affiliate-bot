@@ -2,10 +2,7 @@ name: seesaa blog (XML-RPC) DMM
 
 on:
   schedule:
-    - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
-    - cron: '0 14 * * *' # 毎日 UTC14時（JST 23時）
-    - cron: '0 3 * * *' # 毎日 UTC3時（JST 12時）
-    - cron: '0 22 * * *' # 毎日 UTC22時（JST 翌7時）
+    - cron: '0 11 * 1 *' # 毎日 UTC11時（JST 20時）
   workflow_dispatch:
 
 jobs:
