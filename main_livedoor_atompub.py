@@ -158,7 +158,7 @@ def run_livedoor_one_item(
     else:
         portal_url = f"https://fanzaportal.com/{floor_pg}/{content_id}"
 
-    title = post["title"]
+    raw_title = (post.get("title") or "").strip()
     ai_review = get_ai_review_summary(account_id, content_id)
     if not ai_review or not str(ai_review.get("review_digest") or "").strip():
         logger.warning(
@@ -167,7 +167,14 @@ def run_livedoor_one_item(
             item_id,
         )
         return False
-    display_title = blog_post_title_for_item(title, post, ai_review)
+    display_title = blog_post_title_for_item(raw_title, post, ai_review)
+    if not display_title.strip():
+        display_title = raw_title or f"作品レビュー {content_id}"
+        logger.warning(
+            "投稿タイトルが空のためフォールバック: content_id=%s title=%r",
+            content_id,
+            display_title[:80],
+        )
     twitter_text = build_twitter_text(
         display_title,
         comment,
@@ -190,14 +197,23 @@ def run_livedoor_one_item(
         item_row=post,
         ai_review_row=ai_review,
     )
-    logger.info("Supabase 取得: %s - %s（投稿タイトル: %s）", item_id, title, display_title)
+    logger.info(
+        "Supabase 取得: %s - %s（投稿タイトル: %s）",
+        item_id,
+        raw_title or "(タイトルなし)",
+        display_title,
+    )
 
     if dry:
         logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:8000])
         return True
 
     try:
-        post_to_livedoor_blog(display_title, body_html)
+        post_to_livedoor_blog(
+            display_title,
+            body_html,
+            title_fallback=raw_title or f"作品レビュー {content_id}",
+        )
     except Exception as e:
         logger.exception("投稿に失敗しました: %s", e)
         sys.exit(1)
@@ -501,7 +517,8 @@ if __name__ == "__main__":
     # 例: ["--manual", "タイトル", "--body", "<p>HTML</p>"]
     # _argv_override: list[str] = ["--account", "1", "--service", "ebook", "--floor", "photo", "--draft"]
     #_argv_override: list[str] = ["--account", "6", "--all-targets"]
-    _argv_override: list[str] = []
+    # _argv_override: list[str] = []
+    _argv_override: list[str] = ["--account", "1", "--all-targets"]
     if _argv_override:
         sys.argv = [sys.argv[0]] + _argv_override
     main()

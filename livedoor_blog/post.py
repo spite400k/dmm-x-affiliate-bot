@@ -2132,6 +2132,32 @@ def _atompub_collection_post_url(blog_name: str) -> str:
     return tpl.format(blog_name=blog_name)
 
 
+# Livedoor AtomPub は空の <title> や空の content で 400 Bad Request になる
+_ATOMPUB_TITLE_MAX_CHARS = 120
+_ATOMPUB_BODY_PLACEHOLDER = "<p>詳細は下記リンクからご確認ください。</p>"
+
+
+def _prepare_atompub_title(title: str, *, fallback: str = "") -> str:
+    t = (title or "").strip()
+    if t:
+        if len(t) > _ATOMPUB_TITLE_MAX_CHARS:
+            return t[: _ATOMPUB_TITLE_MAX_CHARS - 1] + "…"
+        return t
+    fb = (fallback or "").strip()
+    if fb:
+        logger.warning("AtomPub タイトルが空のためフォールバックを使用: %s", fb[:80])
+        return fb[:_ATOMPUB_TITLE_MAX_CHARS]
+    logger.warning("AtomPub タイトルが空のため既定タイトルを使用します")
+    return "おすすめ作品レビュー"
+
+
+def _prepare_atompub_body_html(body_html: str) -> str:
+    if (body_html or "").strip():
+        return body_html
+    logger.warning("AtomPub 本文が空のためプレースホルダー HTML を付与します")
+    return _ATOMPUB_BODY_PLACEHOLDER
+
+
 def _build_atom_entry_xml(title: str, body_html: str, draft: bool) -> bytes:
     t = xml_escape(title)
     body_safe = body_html.replace("]]>", "]]]]><![CDATA[>")
@@ -2148,7 +2174,9 @@ def _build_atom_entry_xml(title: str, body_html: str, draft: bool) -> bytes:
     return xml.encode("utf-8")
 
 
-def _post_atompub(title: str, body_html: str) -> None:
+def _post_atompub(
+    title: str, body_html: str, *, title_fallback: str = ""
+) -> None:
     blog_name = os.environ["LIVEDOOR_BLOG_NAME"].strip()
     livedoor_id = os.environ["LIVEDOOR_ID"].strip()
     basic_user = os.environ.get("LIVEDOOR_ATOMPUB_BASIC_USER", "").strip() or livedoor_id
@@ -2159,8 +2187,10 @@ def _post_atompub(title: str, body_html: str) -> None:
         "yes",
         "on",
     )
+    safe_title = _prepare_atompub_title(title, fallback=title_fallback)
+    safe_body = _prepare_atompub_body_html(body_html)
     url = _atompub_collection_post_url(blog_name)
-    payload = _build_atom_entry_xml(title, body_html, draft=draft)
+    payload = _build_atom_entry_xml(safe_title, safe_body, draft=draft)
     headers = {"Content-Type": "application/atom+xml;type=entry"}
     logger.info("Livedoor AtomPub 投稿: %s", url)
     r = requests.post(
@@ -2179,6 +2209,16 @@ def _post_atompub(title: str, body_html: str) -> None:
                 "ユーザー名は公式ではライブドアIDです。401 が続く場合は "
                 "LIVEDOOR_ATOMPUB_BASIC_USER に blog_id（例: %s）を設定して試してください。",
                 blog_name,
+            )
+        elif r.status_code == 400:
+            logger.error(
+                "AtomPub 400: 送信 title=%r（%d 文字）body=%d 文字。"
+                " 空タイトル・空本文・XML 不正が典型原因です。"
+                " title_fallback=%r",
+                safe_title[:80],
+                len(safe_title),
+                len(safe_body),
+                (title_fallback or "")[:80],
             )
     r.raise_for_status()
 
@@ -2293,7 +2333,9 @@ def _post_playwright(title: str, body_html: str) -> None:
             browser.close()
 
 
-def post_to_livedoor_blog(title: str, body_html: str) -> None:
+def post_to_livedoor_blog(
+    title: str, body_html: str, *, title_fallback: str = ""
+) -> None:
     if not is_livedoor_blog_enabled():
         return
     method = _post_method()
@@ -2304,4 +2346,4 @@ def post_to_livedoor_blog(title: str, body_html: str) -> None:
         raise ValueError(
             f"不明な LIVEDOOR_POST_METHOD: {method!r}（atompub または playwright）"
         )
-    _post_atompub(title, body_html)
+    _post_atompub(title, body_html, title_fallback=title_fallback)
