@@ -14,6 +14,14 @@
 -- platform = 'fc2' のとき:
 --   xmlrpc_url … 未指定なら http://blog.fc2.com/xmlrpc.php（アプリ側デフォルト）
 --   site, service, floor … 任意。config の targets が空のとき main_fc2_blog の 1 件キュー指定に使用
+--
+-- platform = 'seesaa' のとき（Seesaaブログ／セイサーブログ）:
+--   blog_id … metaWeblog の blogid（ホスト名。例: gravure.seesaa.blog。https:// 付き URL も可）
+--   username … アカウント登録メールアドレス
+--   api_password … マイブログへのログインパスワード
+--   xmlrpc_url … 未指定なら https://blog.seesaa.jp/rpc
+--   blog_key … 任意。省略時 seesaa:{blog_id}（投稿済みキー）
+--   site, service, floor … 任意。main_seesaa_blog のキュー指定に使用
 
 drop table  public.mst_blog_accounts;
 create table if not exists public.mst_blog_accounts (

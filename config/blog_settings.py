@@ -1,6 +1,6 @@
 """ブログ投稿ジョブ用のアカウント設定。
 
-main_livedoor_atompub.py / main_fc2_blog.py が参照する。
+main_livedoor_atompub.py / main_fc2_blog.py / main_seesaa_blog.py が参照する。
 ライブドアの portal リンク用に site（dmm / fanza）を持つ。
 """
 

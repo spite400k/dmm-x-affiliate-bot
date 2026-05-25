@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BLOG_ACCOUNT_TABLE = "mst_blog_accounts"
 DEFAULT_FC2_XMLRPC_URL = "http://blog.fc2.com/xmlrpc.php"
+DEFAULT_SEESAA_XMLRPC_URL = "https://blog.seesaa.jp/rpc"
 
 
 def _is_missing_blog_table_error(exc: BaseException) -> bool:
@@ -24,6 +25,25 @@ def _pick(row: dict[str, Any], *keys: str) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def normalize_seesaa_blog_id_hint(raw: str) -> str:
+    """Seesaa metaWeblog の blogid 用に、URL や余分なスラッシュを除去する。
+
+    例:
+      https://gravure.seesaa.blog/ → gravure.seesaa.blog
+      test.xblog.jp → test.xblog.jp
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return s
+    if "://" in s:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(s)
+        host = (parsed.netloc or parsed.path.split("/")[0]).strip()
+        return host.rstrip("/").lower()
+    return s.rstrip("/")
 
 
 def _table_name() -> str:
@@ -105,6 +125,53 @@ def list_enabled_fc2_blog_configs(account_id: str) -> list[dict[str, str]]:
         if cfg:
             out.append(cfg)
     return out
+
+
+def _seesaa_row_to_config(row: dict[str, Any], account_id: str) -> dict[str, str] | None:
+    """1行分を Seesaa（セイサーブログ）XML-RPC 用フラット dict に変換。必須欠けなら None。
+
+    blog_id … metaWeblog.newPost の blogid（例: gravure.seesaa.blog / test.xblog.jp）。
+    username … アカウント登録メールアドレス。
+    api_password … マイブログログイン用パスワード（XML-RPC 用 API キーではない）。
+    """
+    blog_id = normalize_seesaa_blog_id_hint(
+        _pick(row, "blog_id", "seesaa_blog_id", "seesar_blog_id")
+    )
+    username = _pick(row, "username", "login_id", "email")
+    password = _pick(row, "api_password", "xmlrpc_password", "password")
+    if not blog_id or not username or not password:
+        return None
+
+    blog_key = _pick(row, "blog_key", "post_key") or f"seesaa:{blog_id}"
+    xmlrpc_url = _pick(row, "xmlrpc_url", "api_url") or DEFAULT_SEESAA_XMLRPC_URL
+    out: dict[str, str] = {
+        "blog_key": blog_key,
+        "blog_id": blog_id,
+        "username": username,
+        "password": password,
+        "xmlrpc_url": xmlrpc_url,
+    }
+    for k in ("site", "service", "floor"):
+        v = str(row.get(k) or "").strip()
+        if v:
+            out[k] = v
+    return out
+
+
+def list_enabled_seesaa_blog_configs(account_id: str) -> list[dict[str, str]]:
+    """platform=seesaa, enabled=true の行をすべて返す（blog_id 昇順）。"""
+    out: list[dict[str, str]] = []
+    for row in list_enabled_blog_rows(account_id, "seesaa"):
+        cfg = _seesaa_row_to_config(row, account_id)
+        if cfg:
+            out.append(cfg)
+    return out
+
+
+def get_enabled_seesaa_blog_config(account_id: str) -> dict[str, str] | None:
+    """Seesaaブログ投稿用の接続情報をマスタから取得する（有効行が複数あるときは先頭）。"""
+    rows = list_enabled_seesaa_blog_configs(account_id)
+    return rows[0] if rows else None
 
 
 def get_enabled_fc2_blog_config(account_id: str) -> dict[str, str] | None:
