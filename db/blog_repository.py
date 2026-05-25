@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BLOG_ACCOUNT_TABLE = "mst_blog_accounts"
 DEFAULT_FC2_XMLRPC_URL = "http://blog.fc2.com/xmlrpc.php"
-DEFAULT_SEESAA_XMLRPC_URL = "https://blog.seesaa.jp/rpc"
+from seesaa_blog.rpc import DEFAULT_SEESAA_XMLRPC_URL
 
 
 def _is_missing_blog_table_error(exc: BaseException) -> bool:

@@ -52,6 +52,10 @@ from db.blog_repository import (
     list_enabled_seesaa_blog_configs,
     normalize_seesaa_blog_id_hint,
 )
+from seesaa_blog.rpc import (
+    is_seesaa_access_denied,
+    seesaa_xmlrpc_call,
+)
 from db.post_repository import (
     get_ai_review_summary,
     get_next_livedoor_post,
@@ -80,8 +84,11 @@ def list_seesaa_blogs(
     xmlrpc_url: str, username: str, password: str
 ) -> list[dict[str, Any]]:
     """blogger.getUsersBlogs でアカウント配下のブログ一覧を返す。"""
-    proxy = xmlrpc.client.ServerProxy(xmlrpc_url, allow_none=True)
-    blogs = proxy.blogger.getUsersBlogs(username, password)
+
+    def _call(proxy: xmlrpc.client.ServerProxy) -> Any:
+        return proxy.blogger.getUsersBlogs(username, password)
+
+    blogs = seesaa_xmlrpc_call(xmlrpc_url, _call)
     if isinstance(blogs, list):
         return [b for b in blogs if isinstance(b, dict)]
     return []
@@ -232,19 +239,21 @@ def meta_weblog_new_post(
     publish: bool,
 ) -> str:
     """metaWeblog.newPost を実行し、作成された postid（文字列）を返す。"""
-    proxy = xmlrpc.client.ServerProxy(xmlrpc_url, allow_none=True)
     contents: dict[str, Any] = {
         "title": title,
         "description": description,
     }
-    post_id = proxy.metaWeblog.newPost(
-        blog_id,
-        username,
-        password,
-        contents,
-        1 if publish else 0,
-    )
-    return str(post_id)
+
+    def _call(proxy: xmlrpc.client.ServerProxy) -> Any:
+        return proxy.metaWeblog.newPost(
+            blog_id,
+            username,
+            password,
+            contents,
+            1 if publish else 0,
+        )
+
+    return str(seesaa_xmlrpc_call(xmlrpc_url, _call))
 
 
 def _dry_run() -> bool:
@@ -408,6 +417,28 @@ def run_seesaa_one_item(
         )
         time.sleep(SLEEP_SECONDS_AFTER_POST)
         return False
+    except xmlrpc.client.ProtocolError as e:
+        if is_seesaa_access_denied(e):
+            logger.error(
+                "Seesaa XML-RPC が拒否されました（HTTP %s %s）。"
+                " GitHub Actions 等のクラウド IP からは 403 になることがあります。"
+                " 自宅 PC・self-hosted runner・ローカル cron での実行を検討してください。"
+                " 作品はキューから除外しません（次回再試行）。",
+                e.errcode,
+                e.errmsg,
+            )
+        else:
+            logger.exception(
+                "Seesaa XML-RPC ProtocolError: account=%s item=%s %s",
+                account_id,
+                item_id,
+                e,
+            )
+            _exclude_item_after_post_failure(
+                item_id, account_id, blog_key, account_id
+            )
+        time.sleep(SLEEP_SECONDS_AFTER_POST)
+        return False
     except OSError as e:
         logger.exception(
             "Seesaa 接続エラー: account=%s item=%s %s",
@@ -415,9 +446,10 @@ def run_seesaa_one_item(
             item_id,
             e,
         )
-        _exclude_item_after_post_failure(
-            item_id, account_id, blog_key, account_id
-        )
+        if not is_seesaa_access_denied(e):
+            _exclude_item_after_post_failure(
+                item_id, account_id, blog_key, account_id
+            )
         time.sleep(SLEEP_SECONDS_AFTER_POST)
         return False
     except Exception as e:
@@ -427,9 +459,14 @@ def run_seesaa_one_item(
             item_id,
             e,
         )
-        _exclude_item_after_post_failure(
-            item_id, account_id, blog_key, account_id
-        )
+        if is_seesaa_access_denied(e):
+            logger.error(
+                "アクセス拒否のためキューからは除外しません（次回再試行）。"
+            )
+        else:
+            _exclude_item_after_post_failure(
+                item_id, account_id, blog_key, account_id
+            )
         time.sleep(SLEEP_SECONDS_AFTER_POST)
         return False
 

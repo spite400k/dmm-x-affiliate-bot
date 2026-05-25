@@ -33,6 +33,9 @@ jobs:
           echo "SUPABASE_KEY_1=${{ secrets.SUPABASE_KEY_1 }}" >> .env
 
       - name: Run seesaa XML-RPC (targets ループ)
+        env:
+          # Seesaa WAF 対策（403 時は ssl エンドポイントへ自動フォールバック）
+          SEESAA_XMLRPC_USER_AGENT: Mozilla/5.0 (compatible; dmm-x-affiliate-bot/1.0)
         run: python main_seesaa_blog.py --account 1 --all-targets
 
       - name: Upload debug artifacts
