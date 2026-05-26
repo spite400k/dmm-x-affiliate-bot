@@ -51,6 +51,34 @@ logger = logging.getLogger(__name__)
 LIVEDOOR_LOGIN_URL = "https://livedoor.blogcms.jp/member/"
 # 記事コレクション POST 先（公式: …/atompub/{blog_name}/article）。末尾なしは 400 Unknown endpoint になる
 _DEFAULT_ATOMPUB_COLLECTION_TMPL = "https://livedoor.blogcms.jp/atompub/{blog_name}/article"
+# Livedoor AtomPub: 空 title/content で 400。title は 86 文字以上で 400（実測上限 85）
+_ATOMPUB_TITLE_MAX_CHARS = 85
+_ATOMPUB_BODY_PLACEHOLDER = "<p>詳細は下記リンクからご確認ください。</p>"
+
+
+def _fit_atompub_title(title: str) -> str:
+    t = (title or "").strip()
+    if not t or len(t) <= _ATOMPUB_TITLE_MAX_CHARS:
+        return t
+    return t[: _ATOMPUB_TITLE_MAX_CHARS - 1] + "…"
+
+
+def _fit_catchy_title(hook: str, core: str, tail: str) -> str:
+    """hook + core + tail を AtomPub 上限以内に収める。"""
+    candidate = f"{hook}{core}{tail}"
+    if len(candidate) <= _ATOMPUB_TITLE_MAX_CHARS:
+        return candidate
+    max_core = _ATOMPUB_TITLE_MAX_CHARS - len(hook) - len(tail)
+    if max_core >= 1:
+        short = core if len(core) <= max_core else core[: max_core - 1] + "…"
+        fitted = f"{hook}{short}{tail}"
+        if len(fitted) <= _ATOMPUB_TITLE_MAX_CHARS:
+            return fitted
+    alt_tail = "レビュー｜今すぐチェック"
+    max_core = _ATOMPUB_TITLE_MAX_CHARS - len(hook) - len(alt_tail)
+    short = core if len(core) <= max_core else core[: max_core - 1] + "…"
+    return f"{hook}{short}{alt_tail}"
+
 
 _DEFAULT_TITLE_SELECTORS = (
     'input[name="article[title]"]',
@@ -968,14 +996,13 @@ def blog_post_title_for_item(
         tail = "レビュー！今すぐチェック"
         if mid:
             tail = f"レビュー！{mid}｜今すぐチェック"
-        candidate = f"{hook}{core}{tail}"
-        if len(candidate) <= 120:
-            return candidate
-        short_core = core if len(core) <= 48 else core[:47] + "…"
-        return f"{hook}{short_core}レビュー｜今すぐチェック"
+        return _fit_catchy_title(hook, core, tail)
     if len(t) > 58:
-        return f"{core[:52]}… レビュー｜チェック" if len(core) > 52 else f"{core} レビュー｜チェック"
-    return t
+        suffix = " レビュー｜チェック"
+        if len(core) > 52:
+            return _fit_atompub_title(f"{core[:52]}…{suffix}")
+        return _fit_atompub_title(f"{core}{suffix}")
+    return _fit_atompub_title(t)
 
 
 def _trim_for_reader(
@@ -2132,21 +2159,14 @@ def _atompub_collection_post_url(blog_name: str) -> str:
     return tpl.format(blog_name=blog_name)
 
 
-# Livedoor AtomPub は空の <title> や空の content で 400 Bad Request になる
-_ATOMPUB_TITLE_MAX_CHARS = 120
-_ATOMPUB_BODY_PLACEHOLDER = "<p>詳細は下記リンクからご確認ください。</p>"
-
-
 def _prepare_atompub_title(title: str, *, fallback: str = "") -> str:
-    t = (title or "").strip()
+    t = _fit_atompub_title(title)
     if t:
-        if len(t) > _ATOMPUB_TITLE_MAX_CHARS:
-            return t[: _ATOMPUB_TITLE_MAX_CHARS - 1] + "…"
         return t
     fb = (fallback or "").strip()
     if fb:
         logger.warning("AtomPub タイトルが空のためフォールバックを使用: %s", fb[:80])
-        return fb[:_ATOMPUB_TITLE_MAX_CHARS]
+        return _fit_atompub_title(fb)
     logger.warning("AtomPub タイトルが空のため既定タイトルを使用します")
     return "おすすめ作品レビュー"
 
@@ -2213,11 +2233,12 @@ def _post_atompub(
         elif r.status_code == 400:
             logger.error(
                 "AtomPub 400: 送信 title=%r（%d 文字）body=%d 文字。"
-                " 空タイトル・空本文・XML 不正が典型原因です。"
+                " 空タイトル・空本文・タイトル超過（%d 文字上限）・XML 不正が典型原因です。"
                 " title_fallback=%r",
                 safe_title[:80],
                 len(safe_title),
                 len(safe_body),
+                _ATOMPUB_TITLE_MAX_CHARS,
                 (title_fallback or "")[:80],
             )
     r.raise_for_status()
