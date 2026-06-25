@@ -404,7 +404,7 @@ def main() -> None:
                     ):
                         any_done = True
                 if not any_done:
-                    sys.exit(2)
+                    logger.info("全ターゲットで投稿対象なし。正常終了します。")
                 return
 
             apply_livedoor_env_from_config(ld_rows[0])
@@ -437,7 +437,7 @@ def main() -> None:
                 ):
                     any_done = True
             if not any_done:
-                sys.exit(2)
+                logger.info("全ターゲットで投稿対象なし。正常終了します。")
             return
 
         rows_sf = _livedoor_rows_with_service_floor(ld_rows)
@@ -475,9 +475,7 @@ def main() -> None:
             dry=dry,
             no_mark_posted=args.no_mark_posted,
         )
-        if not ok:
-            sys.exit(2)
-        if dry:
+        if dry and ok:
             sys.exit(0)
         return
 

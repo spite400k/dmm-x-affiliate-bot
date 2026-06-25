@@ -686,7 +686,7 @@ def main() -> None:
                 ):
                     any_done = True
             if not any_done:
-                sys.exit(2)
+                logger.info("全ターゲットで投稿対象なし。正常終了します。")
             return
 
         seesaa_cfg = seesaa_rows[0]
@@ -719,7 +719,7 @@ def main() -> None:
             ):
                 any_done = True
         if not any_done:
-            sys.exit(2)
+            logger.info("全ターゲットで投稿対象なし。正常終了します。")
         return
 
     rows_sf = _seesaa_rows_with_service_floor(seesaa_rows)
@@ -757,9 +757,7 @@ def main() -> None:
         no_mark_posted=args.no_mark_posted,
         publish=publish,
     )
-    if not ok:
-        sys.exit(2)
-    if dry:
+    if dry and ok:
         sys.exit(0)
 
 
