@@ -1,8 +1,6 @@
 name: Post to Twitter (DMM X Bot)
 
 on:
-  schedule:
-    - cron: '0 11 * 1 *' # 毎日 UTC11時（JST 20時）
   workflow_dispatch:
 
 jobs:

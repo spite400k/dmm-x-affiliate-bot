@@ -3,7 +3,6 @@ name: Livedoor blog (AtomPub) mesugaki
 on:
   schedule:
     - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
-    - cron: '0 14 * * *' # 毎日 UTC14時（JST 23時）
   workflow_dispatch:
 
 jobs:
