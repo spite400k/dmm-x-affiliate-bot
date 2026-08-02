@@ -2,7 +2,10 @@ name: Livedoor blog (AtomPub) FANZA
 
 on:
   schedule:
+    - cron: '0 3 * * *' # 毎日 UTC3時（JST 12時）
     - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
+    - cron: '0 13 * * *' # 毎日 UTC13時（JST 22時）
+    - cron: '0 15 * * *' # 毎日 UTC15時（JST 24時）
   workflow_dispatch:
 
 jobs:

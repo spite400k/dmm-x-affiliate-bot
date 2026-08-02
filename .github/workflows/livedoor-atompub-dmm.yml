@@ -2,6 +2,7 @@ name: Livedoor blog (AtomPub) DMM
 
 on:
   schedule:
+    - cron: '0 3 * * *' # 毎日 UTC3時（JST 12時）
     - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
   workflow_dispatch:
 
