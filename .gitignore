@@ -1,5 +1,6 @@
 *.log
 *.log.*
+logs/
 *.pyc
 .env
 /data/
