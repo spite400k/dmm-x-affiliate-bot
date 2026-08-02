@@ -12,7 +12,8 @@
      行が無い・テーブルが無い・必須列が欠ける場合はエラーで終了（.env の LIVEDOOR_* は使わない）
   3) mst_blog_accounts（platform=livedoor, enabled=true）の各行の site / service / floor に応じて
      未投稿キューを取得し livedoor.blogcms.jp へ AtomPub POST。
-     本文は ①review_digest → ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク の順。
+     本文は ①review_digest → ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク
+     → ⑤プレミアム宣伝（site/account 別・URL 設定時のみ） の順。
      行に service/floor が無い場合のみ、BLOG_ACCOUNT_SETTINGS の targets（または先頭行の service/floor）にフォールバック。
      --all-targets で複数行を順に試行（DRY_RUN 時も全ターゲットを試し、最初の成功で打ち切らない）
 
@@ -196,6 +197,8 @@ def run_livedoor_one_item(
         campaigns=campaigns,
         item_row=post,
         ai_review_row=ai_review,
+        account_id=account_id,
+        portal_site=site_portal,
     )
     logger.info(
         "Supabase 取得: %s - %s（投稿タイトル: %s）",

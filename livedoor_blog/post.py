@@ -26,10 +26,12 @@ Playwright:
 記事 HTML の体裁:
   LIVEDOOR_ARTICLE_STYLE=simple / popular いずれも本文は次の順:
     ① review_digest（筆者レビュー）→ 立ち読み（PR）→ ②パッケージ画像 → サンプル動画（FANZA・あり時）
-    → ③サンプル画像 → ④ポータル（アフィリエイト）リンク。
+    → ③サンプル画像 → ④ポータル（アフィリエイト）リンク
+    → ⑤プレミアム宣伝（site/account 別・アフィリエイト URL があるときのみ独立セクション）。
   記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
+  account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
 """
 
 from __future__ import annotations
@@ -1947,6 +1949,52 @@ def _affiliate_cta_section_html(
     return box
 
 
+def _premium_promo_section_html(
+    *,
+    account_id: str | None = None,
+    portal_site: str | None = None,
+) -> str:
+    """作品 CTA とは別枠のプレミアム宣伝（アフィリエイト URL があるときのみ）。"""
+    from config.blog_settings import resolve_premium_promo
+
+    promo = resolve_premium_promo(account_id=account_id, site=portal_site)
+    if not promo:
+        return ""
+
+    href = (promo.get("affiliate_url") or "").strip()
+    if not href:
+        return ""
+
+    heading = (promo.get("heading") or "プレミアムのご案内（PR）").strip()
+    blurb = (promo.get("blurb") or "").strip()
+    cta_label = (
+        promo.get("cta_label") or "▶ プレミアムの詳細・お申し込みはこちら（PR）"
+    ).strip()
+
+    inner: list[str] = []
+    if blurb:
+        inner.append(
+            '<p style="margin:0 0 1rem;line-height:1.7;color:#333;">'
+            f"{html_module.escape(blurb)}"
+            "</p>"
+        )
+    inner.append(_cta_button_html(href, cta_label, primary=True))
+    inner.append(
+        '<p style="margin:0.75rem 0 0;font-size:0.8em;color:#666;">'
+        "※本枠は広告・アフィリエイト（PR）です。料金・特典は変更される場合があります。"
+        "</p>"
+    )
+    return (
+        '<div class="ld-premium-promo" style="margin:1.75rem 0;padding:1.25rem 1rem;'
+        'border:2px solid #1565c0;border-radius:10px;'
+        'background:linear-gradient(180deg,#f5f9ff 0%,#eef5ff 100%);">'
+        '<h2 style="margin:0 0 1rem;padding:0;font-size:1.2em;color:#0d47a1;text-align:center;">'
+        f"{html_module.escape(heading)}</h2>"
+        + "".join(inner)
+        + "</div>"
+    )
+
+
 def _review_fallback_text(
     title: str,
     *,
@@ -1975,8 +2023,10 @@ def _build_digest_sample_affiliate_body(
     ai_review_row: dict[str, Any] | None,
     review_fallback: str = "",
     campaigns: list | None = None,
+    account_id: str | None = None,
+    portal_site: str | None = None,
 ) -> str:
-    """本文コア: ①筆者レビュー → 立ち読み → ②パッケージ → サンプル動画(FANZA) → ③画像 → ④CTA。"""
+    """本文コア: ①筆者レビュー → 立ち読み → ②パッケージ → サンプル動画(FANZA) → ③画像 → ④CTA → ⑤プレミアム。"""
     if campaigns is None and item_row:
         raw_c = item_row.get("campaign")
         campaigns = raw_c if isinstance(raw_c, list) else []
@@ -2014,6 +2064,12 @@ def _build_digest_sample_affiliate_body(
     )
     if affiliate:
         parts.append(affiliate)
+    premium = _premium_promo_section_html(
+        account_id=account_id,
+        portal_site=portal_site,
+    )
+    if premium:
+        parts.append(premium)
     return "\n".join(parts)
 
 
@@ -2050,6 +2106,8 @@ def _build_simple_livedoor_html(
     item_row: dict[str, Any] | None,
     ai_review_row: dict[str, Any] | None,
     campaigns: list | None = None,
+    account_id: str | None = None,
+    portal_site: str | None = None,
 ) -> str:
     # タイトルは Atom <title> で既に表示されるため本文では繰り返さない
     return _build_digest_sample_affiliate_body(
@@ -2062,6 +2120,8 @@ def _build_simple_livedoor_html(
         item_row=item_row,
         ai_review_row=ai_review_row,
         campaigns=campaigns,
+        account_id=account_id,
+        portal_site=portal_site,
     )
 
 
@@ -2079,6 +2139,8 @@ def _build_popular_livedoor_html(
     item_row: dict[str, Any] | None,
     ai_review_row: dict[str, Any] | None,
     campaigns: list | None = None,
+    account_id: str | None = None,
+    portal_site: str | None = None,
 ) -> str:
     """digest_raw 筆者レビュー → パッケージ画像 → サンプル画像 → アフィリエイト（PR 注記付き）。"""
     body = _build_digest_sample_affiliate_body(
@@ -2094,6 +2156,8 @@ def _build_popular_livedoor_html(
             title, comment=comment, summary=summary, point=point
         ),
         campaigns=campaigns,
+        account_id=account_id,
+        portal_site=portal_site,
     )
     return "\n".join(
         [
@@ -2121,6 +2185,8 @@ def build_livedoor_blog_html(
     article_style: str | None = None,
     item_row: dict[str, Any] | None = None,
     ai_review_row: dict[str, Any] | None = None,
+    account_id: str | None = None,
+    portal_site: str | None = None,
 ) -> str:
     """item_row / ai_review_row に DB 行を渡すと、作品スペックと AI レビュー要約を本文に展開する。"""
     style = _article_style(article_style)
@@ -2138,6 +2204,8 @@ def build_livedoor_blog_html(
             item_row=item_row,
             ai_review_row=ai_review_row,
             campaigns=campaigns,
+            account_id=account_id,
+            portal_site=portal_site,
         )
     return _build_simple_livedoor_html(
         title=title,
@@ -2149,6 +2217,8 @@ def build_livedoor_blog_html(
         item_row=item_row,
         ai_review_row=ai_review_row,
         campaigns=campaigns,
+        account_id=account_id,
+        portal_site=portal_site,
     )
 
 

@@ -215,6 +215,8 @@ def run_fc2_one_item(
         campaigns=campaigns,
         item_row=post,
         ai_review_row=ai_review,
+        account_id=account_id,
+        portal_site=site_portal,
     )
     logger.info(
         "Supabase 取得: %s - %s（投稿タイトル: %s）",
