@@ -2,10 +2,17 @@ name: Post to Twitter (DMM X Bot)
 
 on:
   workflow_dispatch:
+  schedule:
+    # JST 12:00 / 21:00 → UTC 03:00 / 12:00（1日最大2スロット）
+    - cron: "0 3 * * *"
+    - cron: "0 12 * * *"
 
 jobs:
   post-tweet:
     runs-on: ubuntu-latest
+    env:
+      # schedule のみ skip（手動実行は必ず投稿）
+      POST_SKIP_RATE: ${{ github.event_name == 'schedule' && '0.4' || '0' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -45,7 +52,7 @@ jobs:
           echo "BEARER_TOKEN_3=${{ secrets.BEARER_TOKEN_3 }}" >> .env
 
       - name: Run tweet bot
-        run: python main.py
+        run: python main_x.py
 
       - name: Upload debug artifacts
         if: always()
