@@ -124,6 +124,57 @@ def get_next_post(service: str, floor: str, account_id: str, blog_key: str | Non
         offset += _BATCH
 
 
+def get_next_x_post(
+    service: str,
+    floor: str,
+    account_id: str,
+    *,
+    prefer_review_digest: bool = True,
+) -> dict[str, Any] | None:
+    """X 用: 未投稿作品を1件返す。
+
+    prefer_review_digest=True のときは review_digest ありを優先し、
+    見つからなければ従来の get_next_post にフォールバックする。
+    """
+    if prefer_review_digest:
+        found = _get_next_unposted_with_review_digest(service, floor, account_id)
+        if found:
+            return found
+    return get_next_post(service, floor, account_id)
+
+
+def _get_next_unposted_with_review_digest(
+    service: str, floor: str, account_id: str
+) -> dict[str, Any] | None:
+    """is_posted=False かつ review_digest がある作品を1件返す。"""
+    supabase = init_supabase(account_id)
+    offset = 0
+    while True:
+        res = (
+            supabase.table("trn_dmm_items")
+            .select("*")
+            .eq("is_posted", False)
+            .eq("service", service)
+            .eq("floor", floor)
+            .gt("review_count", 0)
+            .order("review_count", desc=True)
+            .range(offset, offset + _BATCH - 1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return None
+        digest_ids = _content_ids_with_review_digest(
+            account_id,
+            [str(r.get("content_id") or "") for r in rows],
+        )
+        for row in rows:
+            cid = str(row.get("content_id") or "").strip()
+            if cid in digest_ids:
+                return row
+        offset += _BATCH
+
+
 def get_next_livedoor_post(
     service: str, floor: str, account_id: str, blog_key: str
 ) -> dict[str, Any] | None:

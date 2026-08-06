@@ -32,12 +32,9 @@ X_ACCOUNT_SETTINGS = {
         "enabled": True,
         "site": "fanza",
         "screen_name": "Ren47291",
+        # アカウントごとに floor 固定（複数ある場合は先頭のみ使用）
         "targets": [
-            # {"service": "digital", "floor": "anime"},
             {"service": "digital", "floor": "videoa"},
-            {"service": "digital", "floor": "videoc"},
-            {"service": "ebook", "floor": "comic"},
-            {"service": "doujin", "floor": "digital_doujin"},
         ],
     },
     "3": {

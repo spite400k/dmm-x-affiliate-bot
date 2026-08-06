@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import re
 import time
 
 from config.casual_posts import pick_casual_text
@@ -10,7 +11,8 @@ from config.x_settings import (
     X_ACCOUNT_SETTINGS,
 )
 from db.post_repository import (
-    get_next_post,
+    get_ai_review_summary,
+    get_next_x_post,
     mark_post_as_posted,
     mark_post_failed_skip_queue,
 )
@@ -22,6 +24,25 @@ logger = logging.getLogger(__name__)
 
 # 連続投稿によるレート制限を避けるための待機（秒）
 SLEEP_SECONDS_AFTER_POST = 10
+# X 本文に載せる review_digest の目安上限（タイトル・CTA・URL 用の余白を残す）
+REVIEW_DIGEST_MAX_CHARS = 120
+
+
+def clip_review_digest_for_x(
+    digest: str, max_chars: int = REVIEW_DIGEST_MAX_CHARS
+) -> str:
+    """review_digest を X 向けに短く切る。"""
+    text = re.sub(r"\s+", " ", (digest or "").strip())
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    for sep in ("。", "！", "？", "!", "?"):
+        idx = cut.rfind(sep)
+        if idx >= max_chars // 2:
+            return cut[: idx + 1]
+    return cut.rstrip(" 、,") + "…"
 
 
 def build_twitter_text(
@@ -31,10 +52,17 @@ def build_twitter_text(
     point: str,
     campaigns: list | None,
     affiliate_url: str,
+    review_digest: str = "",
 ) -> str:
-    """Twitter 用本文（post_full_twitter に渡す comment 用）。"""
+    """Twitter 用本文（post_full_twitter に渡す comment 用）。
+
+    review_digest があるときは要約スニペットを優先し、無いときだけ auto_comment を使う。
+    """
     parts: list[str] = [title]
-    if comment:
+    digest_snip = clip_review_digest_for_x(review_digest)
+    if digest_snip:
+        parts.append(digest_snip)
+    elif comment:
         parts.append(comment)
     campaign_text = format_campaigns(campaigns)
     if campaign_text:
@@ -125,11 +153,18 @@ def _post_promo_for_account(account_id: str, config: dict, mode: str) -> None:
         )
         return
 
-    target = random.choice(targets)
+    target = targets[0]
+    if len(targets) > 1:
+        logger.warning(
+            "⚠️ %s の targets が複数あります。アカウント固定のため先頭のみ使用: %s/%s",
+            config.get("screen_name", account_id),
+            target["service"],
+            target["floor"],
+        )
     service = target["service"]
     floor = target["floor"]
 
-    post = get_next_post(service, floor, account_id)
+    post = get_next_x_post(service, floor, account_id, prefer_review_digest=True)
     if not post:
         logger.warning(
             "⚠ 投稿対象なし: %s (%s/%s)",
@@ -156,6 +191,15 @@ def _post_promo_for_account(account_id: str, config: dict, mode: str) -> None:
     authors = post.get("author", [])
     actresses = post.get("actress", [])
 
+    ai_review = get_ai_review_summary(account_id, content_id)
+    review_digest = ""
+    if ai_review:
+        review_digest = str(ai_review.get("review_digest") or "").strip()
+    if review_digest:
+        logger.info("AIレビュー要約あり: content_id=%s", content_id)
+    else:
+        logger.info("AIレビュー要約なし → auto_comment を使用: content_id=%s", content_id)
+
     link_placement = "parent" if mode == "promo_parent" else "reply"
     logger.info(
         "タイトル: %s-%s mode=%s link_placement=%s",
@@ -172,6 +216,7 @@ def _post_promo_for_account(account_id: str, config: dict, mode: str) -> None:
         point,
         campaigns,
         affiliate_url,
+        review_digest=review_digest,
     )
 
     try:
