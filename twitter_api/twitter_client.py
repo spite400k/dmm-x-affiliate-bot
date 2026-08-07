@@ -32,14 +32,15 @@ def get_clients(account: str):
     logger.info(f"🔑 Twitter APIクライアントを取得中: アカウント{account}")
     """アカウント名に応じて v1.1 / v2 のクライアントを返す"""
 
-    # 環境変数から認証情報を取得（CONSUMER_* と従来の API_KEY_* の両方を許可）
+    # X Developer Portal 表記に合わせる: API Key / API Key Secret
+    # （旧名 CONSUMER_* は後方互換のためフォールバック）
     load_dotenv()
 
-    consumer_key = _env_secret(f"CONSUMER_KEY_{account}") or _env_secret(
-        f"API_KEY_{account}"
+    consumer_key = _env_secret(f"API_KEY_{account}") or _env_secret(
+        f"CONSUMER_KEY_{account}"
     )
-    consumer_secret = _env_secret(f"CONSUMER_SECRET_KEY_{account}") or _env_secret(
-        f"API_SECRET_KEY_{account}"
+    consumer_secret = _env_secret(f"API_SECRET_KEY_{account}") or _env_secret(
+        f"CONSUMER_SECRET_KEY_{account}"
     )
     access_token = _env_secret(f"ACCESS_TOKEN_{account}")
     access_token_secret = _env_secret(f"ACCESS_TOKEN_SECRET_{account}")

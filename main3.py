@@ -6,16 +6,22 @@ load_dotenv()
 # ------------------------------
 # 1. 認証情報（OAuth1.0a ユーザーコンテキスト）
 # ------------------------------
-CONSUMER_KEY = os.getenv("CONSUMER_KEY_2")
-CONSUMER_SECRET = os.getenv("CONSUMER_SECRET_KEY_2")
+API_KEY = os.getenv("API_KEY_2") or os.getenv("CONSUMER_KEY_2")
+API_SECRET_KEY = os.getenv("API_SECRET_KEY_2") or os.getenv("CONSUMER_SECRET_KEY_2")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN_2")
 ACCESS_TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET_2")
-if not all([CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET]):
-    raise ValueError(f"❌ 認証情報が不足しています,CONSUMER_KEY={CONSUMER_KEY}, CONSUMER_SECRET={CONSUMER_SECRET}, ACCESS_TOKEN={ACCESS_TOKEN}, ACCESS_TOKEN_SECRET={ACCESS_TOKEN_SECRET}")
+if not all([API_KEY, API_SECRET_KEY, ACCESS_TOKEN, ACCESS_TOKEN_SECRET]):
+    raise ValueError(
+        f"❌ 認証情報が不足しています,"
+        f"API_KEY={'set' if API_KEY else None}, "
+        f"API_SECRET_KEY={'set' if API_SECRET_KEY else None}, "
+        f"ACCESS_TOKEN={'set' if ACCESS_TOKEN else None}, "
+        f"ACCESS_TOKEN_SECRET={'set' if ACCESS_TOKEN_SECRET else None}"
+    )
 
 auth = tweepy.OAuth1UserHandler(
-    consumer_key=CONSUMER_KEY,
-    consumer_secret=CONSUMER_SECRET,
+    consumer_key=API_KEY,
+    consumer_secret=API_SECRET_KEY,
     access_token=ACCESS_TOKEN,
     access_token_secret=ACCESS_TOKEN_SECRET
 )

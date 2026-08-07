@@ -5,9 +5,9 @@ import tweepy
 
 # .env ファイルを読み込む
 load_dotenv()
-# Twitter Deverloper Portalで取得
-consumer_key = os.getenv("CONSUMER_KEY_1")
-consumer_secret =  os.getenv("CONSUMER_SECRET_KEY_1")
+# X Developer Portal: API Key / API Key Secret / Bearer / Access Token (+ Secret)
+consumer_key = os.getenv("API_KEY_1") or os.getenv("CONSUMER_KEY_1")
+consumer_secret = os.getenv("API_SECRET_KEY_1") or os.getenv("CONSUMER_SECRET_KEY_1")
 bearer_token = os.getenv("BEARER_TOKEN_1")
 access_token = os.getenv("ACCESS_TOKEN_1")
 access_token_secret = os.getenv("ACCESS_TOKEN_SECRET_1")
