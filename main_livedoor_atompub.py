@@ -20,6 +20,7 @@
 .env:
   SUPABASE_URL_{ACCOUNT}, SUPABASE_KEY_{ACCOUNT}（ACCOUNT は既定 1 → _1）
   LIVEDOOR_ARTICLE_STYLE=popular …長文レビュー風 HTML（simple で従来どおり）
+  LIVEDOOR_CATCHY_TITLE=1 …スマホ新着向けに「出演者｜フック｜レビュー」形式へ整形（0 でオフ）
 
 使用例:
   python main_livedoor_atompub.py --service ebook --floor comic

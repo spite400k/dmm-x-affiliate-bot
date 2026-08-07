@@ -65,6 +65,12 @@ def _fit_atompub_title(title: str) -> str:
     return t[: _ATOMPUB_TITLE_MAX_CHARS - 1] + "…"
 
 
+# スマホのカテゴリ新着は先頭〜30字前後しか見えない想定。名前＋フックを前に寄せる。
+_CATCHY_MOBILE_HOOK_MAX = 36
+_CATCHY_CTA = "｜レビュー"
+_CATCHY_CTA_ALT = "｜チェック"
+
+
 def _fit_catchy_title(hook: str, core: str, tail: str) -> str:
     """hook + core + tail を AtomPub 上限以内に収める。"""
     candidate = f"{hook}{core}{tail}"
@@ -76,8 +82,10 @@ def _fit_catchy_title(hook: str, core: str, tail: str) -> str:
         fitted = f"{hook}{short}{tail}"
         if len(fitted) <= _ATOMPUB_TITLE_MAX_CHARS:
             return fitted
-    alt_tail = "レビュー｜今すぐチェック"
+    alt_tail = _CATCHY_CTA_ALT
     max_core = _ATOMPUB_TITLE_MAX_CHARS - len(hook) - len(alt_tail)
+    if max_core < 1:
+        return _fit_atompub_title(f"{hook}{core}")
     short = core if len(core) <= max_core else core[: max_core - 1] + "…"
     return f"{hook}{short}{alt_tail}"
 
@@ -918,6 +926,49 @@ def _strip_okuri_brackets(title: str) -> str:
     return t
 
 
+def _strip_trailing_credit(core: str, names: list[str]) -> str:
+    """末尾の出演者・著者名を除去（先頭に出すときの重複防止）。"""
+    s = core.strip()
+    for name in names:
+        n = (name or "").strip()
+        if not n or len(s) <= len(n) + 1:
+            continue
+        for sep in (f"。 {n}", f"。{n}", f" {n}", f"　{n}"):
+            if s.endswith(sep):
+                s = s[: -len(sep)].rstrip("。｡.． ").strip()
+                break
+        else:
+            if s.endswith(n):
+                s = s[: -len(n)].rstrip("。｡.． ").strip()
+    return s or core.strip()
+
+
+def _title_hook_front(text: str, *, max_len: int = _CATCHY_MOBILE_HOOK_MAX) -> str:
+    """スマホ1行向けに、タイトル先頭のパンチ行だけ残す。"""
+    s = (text or "").strip()
+    if not s:
+        return ""
+    for sep in ("。", "！", "!", "？", "?"):
+        if sep not in s:
+            continue
+        first = s.split(sep, 1)[0].strip()
+        if len(first) >= 8:
+            ending = "。" if sep == "。" else sep
+            chunk = first + ending
+            if len(chunk) <= max_len:
+                return chunk
+            return first[: max_len - 1] + "…"
+        break
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
+
+
+def _title_already_has_cta(title: str) -> bool:
+    t = title or ""
+    return "レビュー" in t or "チェック" in t
+
+
 def _title_suggests_ebook_digital_bonus(title: str) -> bool:
     t = title
     return "電子版" in t and (
@@ -969,42 +1020,63 @@ def _primary_credit_label(item: dict[str, Any]) -> tuple[str, list[str]]:
     return "", []
 
 
+def _build_mobile_catchy_title(core: str, names: list[str]) -> str:
+    """出演者名を先頭に、フックを短くしてスマホ新着1行で目立つ形にする。"""
+    lead = (names[0] if names else "").strip()
+    body_src = _strip_trailing_credit(core, names) if lead else core
+    hook = _title_hook_front(body_src)
+    if not hook:
+        hook = _title_hook_front(core) or core.strip()
+    cta = "" if _title_already_has_cta(hook) else _CATCHY_CTA
+
+    if lead:
+        # すでに先頭が名前なら二重にしない
+        if hook.startswith(lead) or core.strip().startswith(lead):
+            return _fit_catchy_title("", hook, cta)
+        return _fit_catchy_title(f"{lead}｜", hook, cta)
+    return _fit_catchy_title("", hook, cta)
+
+
 def blog_post_title_for_item(
     title: str,
     item: dict[str, Any] | None = None,
     ai_review_row: dict[str, Any] | None = None,
 ) -> str:
-    """検索・SNS で指が止まりやすい短めのキャッチタイトル（必要なときだけ加工）。"""
+    """スマホのカテゴリ新着1行で目立つキャッチタイトルを生成する。
+
+    LIVEDOOR_CATCHY_TITLE=0 でオフ（元タイトルのまま）。
+    """
     raw = os.environ.get("LIVEDOOR_CATCHY_TITLE", "1").strip().lower()
     if raw in ("0", "false", "no", "off"):
         return title.strip()
     t = title.strip()
+    if not t:
+        return t
     core = _strip_okuri_brackets(t) or t
+    _, names = _primary_credit_label(item) if item else ("", [])
     bonus = _title_suggests_ebook_digital_bonus(t)
     digest = _item_str(ai_review_row.get("review_digest")) if ai_review_row else ""
     tone = _ebook_editorial_tone(item) if item else "default"
-    mid = ""
-    if tone == "photo" and ("王道" in digest or "王道" in core):
-        mid = "王道グラビアの手応えを味わえる"
+
     if bonus and core:
         if tone == "novel":
-            hook = "【電子版特典が熱い】"
+            prefix = "【電子版特典】"
         elif tone == "otherbooks":
-            hook = "【電子版独占特典が熱い】"
+            prefix = "【電子版独占特典】"
         elif tone == "comic":
-            hook = "【電子版限定描き下ろしが熱い】"
+            prefix = "【電子版描き下ろし】"
         else:
-            hook = "【電子版限定カットが熱い】"
-        tail = "レビュー！今すぐチェック"
-        if mid:
-            tail = f"レビュー！{mid}｜今すぐチェック"
-        return _fit_catchy_title(hook, core, tail)
-    if len(t) > 58:
-        suffix = " レビュー｜チェック"
-        if len(core) > 52:
-            return _fit_atompub_title(f"{core[:52]}…{suffix}")
-        return _fit_atompub_title(f"{core}{suffix}")
-    return _fit_atompub_title(t)
+            prefix = "【電子版限定カット】"
+        body_src = _strip_trailing_credit(core, names) if names else core
+        hook = _title_hook_front(body_src, max_len=28)
+        if tone == "photo" and ("王道" in digest or "王道" in core):
+            hook = _title_hook_front(f"王道グラビア {hook}", max_len=28)
+        lead = (names[0] if names else "").strip()
+        if lead and not hook.startswith(lead):
+            return _fit_catchy_title(f"{prefix}{lead}｜", hook, _CATCHY_CTA)
+        return _fit_catchy_title(prefix, hook, _CATCHY_CTA)
+
+    return _build_mobile_catchy_title(core, names)
 
 
 def _trim_for_reader(
