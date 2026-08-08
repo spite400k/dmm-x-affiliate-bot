@@ -25,6 +25,8 @@ class RankingItem:
     rank: int
     title: str
     url: str = ""
+    content_id: str = ""
+    actress: str = ""
 
 
 @dataclass
@@ -49,6 +51,25 @@ def _absolute_portal_url(page_url: str, href: str) -> str:
     if h.startswith("/"):
         return origin + h
     return f"{origin}/{h}"
+
+
+def content_id_from_portal_url(url: str) -> str:
+    """ポータル詳細URLから content_id を抜く（例: …/videoa/ipzz00893）。"""
+    path = (url or "").strip().rstrip("/")
+    if not path:
+        return ""
+    # /videoa/xxx or /ebook/comic/xxx
+    m = re.search(r"/(?:videoa|videoc|anime|nikkatsu|digital_doujin)/([^/?#]+)$", path)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"/ebook/(?:comic|novel|photo|otherbooks)/([^/?#]+)$", path)
+    if m:
+        return m.group(1).strip()
+    # 最終パス要素のフォールバック
+    tail = path.rsplit("/", 1)[-1]
+    if tail and "ranking" not in tail and "." not in tail:
+        return tail
+    return ""
 
 # ---------------------
 # ランキングHTML取得
@@ -96,7 +117,14 @@ def parse_fanza_portal_weekly(html: str, *, page_url: str = "") -> RankingPage |
         title = _norm_ws(link.get_text())
         href = _absolute_portal_url(base, str(link.get("href") or ""))
         if title:
-            items.append(RankingItem(rank=rank, title=title, url=href))
+            items.append(
+                RankingItem(
+                    rank=rank,
+                    title=title,
+                    url=href,
+                    content_id=content_id_from_portal_url(href),
+                )
+            )
 
     items.sort(key=lambda x: x.rank)
     if not items:
@@ -143,7 +171,14 @@ def parse_dmm_portal_weekly(html: str, *, page_url: str = "") -> RankingPage | N
         title = _norm_ws(link.get_text())
         href = _absolute_portal_url(base, str(link.get("href") or ""))
         if title:
-            items.append(RankingItem(rank=rank, title=title, url=href))
+            items.append(
+                RankingItem(
+                    rank=rank,
+                    title=title,
+                    url=href,
+                    content_id=content_id_from_portal_url(href),
+                )
+            )
 
     items.sort(key=lambda x: x.rank)
     if not items:

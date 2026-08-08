@@ -16,9 +16,20 @@ def sample_page() -> RankingPage:
         headline="2026年99週目｜テストジャンル 今週の人気ランキングTOP3",
         updated="最終更新日: 2026年4月21日",
         items=[
-            RankingItem(1, "短いタイトル", "https://www.fanzaportal.com/videoa/a"),
-            RankingItem(2, "中くらいのタイトルです"),
-            RankingItem(3, "三"),
+            RankingItem(
+                1,
+                "短いタイトル",
+                "https://www.fanzaportal.com/videoa/a",
+                content_id="a",
+                actress="白石るな",
+            ),
+            RankingItem(
+                2,
+                "中くらいのタイトルです",
+                content_id="b",
+                actress="博多彩葉",
+            ),
+            RankingItem(3, "女優なしの長いタイトルですよ", content_id="c"),
         ],
     )
 
@@ -43,7 +54,10 @@ def test_build_ranking_tweet_contains_headline_and_url(sample_page: RankingPage)
     text = mwr.build_ranking_tweet(url, sample_page)
     assert "FANZA動画" in text
     assert "99週目" in text
-    assert "1位 " in text
+    assert "1位 白石るな" in text
+    assert "2位 博多彩葉" in text
+    assert "3位 " in text  # 女優なしはタイトルフォールバック
+    assert "4位 " not in text  # TOP3のみ
     assert url in text
     assert mwr.twitter_weighted_length(text) <= mwr.TWEET_WEIGHTED_SOFT_LIMIT
 
@@ -104,8 +118,10 @@ def test_build_ranking_blog_title_month_week_format() -> None:
     assert title.startswith("FANZA動画｜")
 
 
-def test_build_ranking_tweet_fits_more_ranks_with_short_titles() -> None:
-    items = [RankingItem(i, f"{'あ' * 80}作品{i}") for i in range(1, 8)]
+def test_build_ranking_tweet_top3_only() -> None:
+    items = [
+        RankingItem(i, f"タイトル{i}", actress=f"女優{i}") for i in range(1, 8)
+    ]
     page = RankingPage(
         headline="8月2週ランキング｜動画(AV)",
         updated="",
@@ -114,7 +130,9 @@ def test_build_ranking_tweet_fits_more_ranks_with_short_titles() -> None:
     text = mwr.build_ranking_tweet(
         "https://www.fanzaportal.com/ranking/videoa/weekly", page
     )
-    assert "1位 " in text
+    assert "1位 女優1" in text
+    assert "3位 女優3" in text
+    assert "4位 " not in text
     assert mwr.twitter_weighted_length(text) <= mwr.TWEET_WEIGHTED_SOFT_LIMIT
 
 
@@ -122,10 +140,16 @@ def test_build_ranking_blog_html_lists_and_links(sample_page: RankingPage) -> No
     url = "https://www.fanzaportal.com/ranking/videoa/weekly"
     html = mwr.build_ranking_blog_html(url, sample_page)
     assert "<ol>" in html
+    assert "白石るな" in html
     assert "短いタイトル" in html
     assert 'href="https://www.fanzaportal.com/videoa/a"' in html
     assert url in html
     assert "ランキングページを見る" in html
+
+
+def test_parse_actress_names_from_json() -> None:
+    raw = '[{"id":1,"name":"白石るな","ruby":"しらいしるな"}]'
+    assert mwr._parse_actress_names(raw) == ["白石るな"]
 
 
 def test_log_ranking_post_content_does_not_raise(

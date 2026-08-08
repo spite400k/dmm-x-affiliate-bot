@@ -13,6 +13,7 @@ WEEKLY_RANKING_SEQUENCE の第2要素が X_ACCOUNT_SETTINGS のアカウントID
 from __future__ import annotations
 
 import html as html_module
+import json
 import logging
 import os
 import re
@@ -31,7 +32,11 @@ from livedoor_blog.post import post_to_livedoor_blog
 from twitter_api.safe_post import safe_post_tweet
 from twitter_api.twitter_client import get_clients
 from utils.logger import setup_logger
-from utils.portal_ranking import RankingPage, fetch_weekly_ranking
+from utils.portal_ranking import (
+    RankingPage,
+    content_id_from_portal_url,
+    fetch_weekly_ranking,
+)
 
 setup_logger("main_weekly_ranking.log")
 logger = logging.getLogger(__name__)
@@ -48,9 +53,9 @@ WEEKLY_RANKING_SEQUENCE: list[tuple[str, str]] = [
     # ("https://www.dmmportal.jp/ranking/ebook/photo/weekly", "1"),
 ]
 
-TOP_RANKS_IN_TWEET = 7
-TOP_RANKS_IN_BLOG = 10
-# ツイート題名は X 加重文字数ベースで短くする（日本語は概ね2）
+TOP_RANKS_IN_TWEET = 3
+TOP_RANKS_IN_BLOG = 3
+# 女優名がないときのフォールバック題名（X 加重）
 MAX_TITLE_WEIGHTED_TWEET = 22
 MAX_TITLE_CHARS = 72
 SLEEP_SECONDS_BETWEEN_POSTS = 15
@@ -126,6 +131,74 @@ def _clip_title_weighted(title: str, *, max_weight: int = MAX_TITLE_WEIGHTED_TWE
     return "".join(out) + "…"
 
 
+def _parse_actress_names(val: object) -> list[str]:
+    """trn_dmm_items.actress（JSON配列/文字列）から名前を取り出す。"""
+    if val is None:
+        return []
+    if isinstance(val, list):
+        names: list[str] = []
+        for x in val:
+            if isinstance(x, dict):
+                n = str(x.get("name") or "").strip()
+            else:
+                n = str(x).strip()
+            if n:
+                names.append(n)
+        return names[:3]
+    s = str(val).strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            parsed = json.loads(s.replace("'", '"'))
+        except json.JSONDecodeError:
+            return [s]
+        return _parse_actress_names(parsed)
+    return [s]
+
+
+def _rank_label(item) -> str:
+    """順位行の表示名（女優名優先、なければタイトル短縮）。"""
+    actress = (getattr(item, "actress", None) or "").strip()
+    if actress:
+        return actress
+    return _clip_title_weighted(getattr(item, "title", "") or "（タイトル不明）")
+
+
+def enrich_ranking_actresses(account_id: str, page: RankingPage) -> None:
+    """Supabase の actress を content_id で埋める（破壊的）。"""
+    from db.supabase_client import init_supabase
+
+    ids = []
+    for it in page.items:
+        cid = (it.content_id or content_id_from_portal_url(it.url)).strip()
+        it.content_id = cid
+        if cid:
+            ids.append(cid)
+    if not ids:
+        return
+    try:
+        supabase = init_supabase(account_id)
+        res = (
+            supabase.table("trn_dmm_items")
+            .select("content_id, actress")
+            .in_("content_id", ids)
+            .execute()
+        )
+    except Exception:
+        logger.exception("actress 取得失敗 account=%s", account_id)
+        return
+    by_id: dict[str, str] = {}
+    for row in res.data or []:
+        cid = str(row.get("content_id") or "").strip()
+        names = _parse_actress_names(row.get("actress"))
+        if cid and names:
+            by_id[cid] = " / ".join(names)
+    for it in page.items:
+        if it.content_id and it.content_id in by_id:
+            it.actress = by_id[it.content_id]
+
+
 def _extract_week_label(headline: str) -> str:
     """見出しから週ラベルを抜く（例: 2026年32週目 / 8月2週）。"""
     h = (headline or "").strip()
@@ -144,7 +217,7 @@ def _extract_week_label(headline: str) -> str:
 
 
 def build_ranking_tweet(url: str, page: RankingPage) -> str:
-    """X 加重文字数 280 以内に収まる週間ランキングツイートを組む。"""
+    """X 加重文字数 280 以内に収まる週間ランキングツイートを組む（TOP3・女優名）。"""
     week = _extract_week_label(page.headline or "")
     header = "📊 FANZA動画 週間ランキング"
     if week:
@@ -153,9 +226,7 @@ def build_ranking_tweet(url: str, page: RankingPage) -> str:
     def _compose(n: int) -> str:
         lines: list[str] = [header, ""]
         for it in page.items[:n]:
-            lines.append(
-                f"{it.rank}位 {_clip_title_weighted(it.title)}"
-            )
+            lines.append(f"{it.rank}位 {_rank_label(it)}")
         lines.append("")
         lines.append(url)
         return "\n".join(lines)
@@ -189,7 +260,8 @@ def build_ranking_blog_html(url: str, page: RankingPage) -> str:
     esc = html_module.escape
     label = _portal_label(url)
     parts: list[str] = [
-        f"<p>{esc(label)}をまとめました。気になる作品はポータルからチェック。</p>",
+        f"<p>{esc(label)} TOP{TOP_RANKS_IN_BLOG}（女優名）をまとめました。"
+        "気になる作品はポータルからチェック。</p>",
     ]
     if page.headline:
         parts.append(f"<p><strong>{esc(page.headline)}</strong></p>")
@@ -198,16 +270,21 @@ def build_ranking_blog_html(url: str, page: RankingPage) -> str:
 
     parts.append("<ol>")
     for it in page.items[:TOP_RANKS_IN_BLOG]:
+        name = (it.actress or "").strip() or "（女優情報なし）"
         title = esc(it.title)
+        name_esc = esc(name)
         if it.url:
             href = esc(it.url, quote=True)
             parts.append(
                 f'<li value="{it.rank}">'
+                f"<strong>{name_esc}</strong><br>"
                 f'<a href="{href}" rel="noopener noreferrer">{title}</a>'
                 f"</li>"
             )
         else:
-            parts.append(f'<li value="{it.rank}">{title}</li>')
+            parts.append(
+                f'<li value="{it.rank}"><strong>{name_esc}</strong><br>{title}</li>'
+            )
     parts.append("</ol>")
 
     ranking_href = esc(url, quote=True)
@@ -356,6 +433,7 @@ def main() -> None:
             if not page:
                 continue
 
+            enrich_ranking_actresses(account_id, page)
             tweet_text = build_ranking_tweet(url, page)
             blog_title = build_ranking_blog_title(url, page)
             blog_html = build_ranking_blog_html(url, page)

@@ -70,6 +70,8 @@ def test_parse_fanza_portal_weekly_minimal() -> None:
     assert page.items[1].title == "2位の作品タイトル"
     assert page.items[0].url.endswith("/videoa/bbb")
     assert page.items[1].url.endswith("/videoa/aaa")
+    assert page.items[0].content_id == "bbb"
+    assert page.items[1].content_id == "aaa"
 
 
 def test_parse_dmm_portal_weekly_minimal() -> None:
