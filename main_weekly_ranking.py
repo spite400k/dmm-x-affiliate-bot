@@ -144,7 +144,7 @@ def _parse_actress_names(val: object) -> list[str]:
                 n = str(x).strip()
             if n:
                 names.append(n)
-        return names[:3]
+        return names
     s = str(val).strip()
     if not s:
         return []
@@ -158,7 +158,10 @@ def _parse_actress_names(val: object) -> list[str]:
 
 
 def _rank_label(item) -> str:
-    """順位行の表示名（女優名優先、なければタイトル短縮）。"""
+    """順位行の表示名。
+
+    女優がちょうど1人のときだけ女優名。複数・未登録は作品名（短縮）。
+    """
     actress = (getattr(item, "actress", None) or "").strip()
     if actress:
         return actress
@@ -166,13 +169,17 @@ def _rank_label(item) -> str:
 
 
 def enrich_ranking_actresses(account_id: str, page: RankingPage) -> None:
-    """Supabase の actress を content_id で埋める（破壊的）。"""
+    """Supabase の actress を content_id で埋める（破壊的）。
+
+    ちょうど1人のときだけ actress をセット。0人・複数は空のまま（作品名表示）。
+    """
     from db.supabase_client import init_supabase
 
     ids = []
     for it in page.items:
         cid = (it.content_id or content_id_from_portal_url(it.url)).strip()
         it.content_id = cid
+        it.actress = ""
         if cid:
             ids.append(cid)
     if not ids:
@@ -192,8 +199,8 @@ def enrich_ranking_actresses(account_id: str, page: RankingPage) -> None:
     for row in res.data or []:
         cid = str(row.get("content_id") or "").strip()
         names = _parse_actress_names(row.get("actress"))
-        if cid and names:
-            by_id[cid] = " / ".join(names)
+        if cid and len(names) == 1:
+            by_id[cid] = names[0]
     for it in page.items:
         if it.content_id and it.content_id in by_id:
             it.actress = by_id[it.content_id]
@@ -260,7 +267,7 @@ def build_ranking_blog_html(url: str, page: RankingPage) -> str:
     esc = html_module.escape
     label = _portal_label(url)
     parts: list[str] = [
-        f"<p>{esc(label)} TOP{TOP_RANKS_IN_BLOG}（女優名）をまとめました。"
+        f"<p>{esc(label)} TOP{TOP_RANKS_IN_BLOG}をまとめました。"
         "気になる作品はポータルからチェック。</p>",
     ]
     if page.headline:
@@ -270,20 +277,29 @@ def build_ranking_blog_html(url: str, page: RankingPage) -> str:
 
     parts.append("<ol>")
     for it in page.items[:TOP_RANKS_IN_BLOG]:
-        name = (it.actress or "").strip() or "（女優情報なし）"
+        # 女優1人→女優名、複数・未登録→作品名
+        primary = (it.actress or "").strip() or (it.title or "（タイトル不明）")
+        primary_esc = esc(primary)
         title = esc(it.title)
-        name_esc = esc(name)
         if it.url:
             href = esc(it.url, quote=True)
-            parts.append(
-                f'<li value="{it.rank}">'
-                f"<strong>{name_esc}</strong><br>"
-                f'<a href="{href}" rel="noopener noreferrer">{title}</a>'
-                f"</li>"
-            )
+            if (it.actress or "").strip():
+                parts.append(
+                    f'<li value="{it.rank}">'
+                    f"<strong>{primary_esc}</strong><br>"
+                    f'<a href="{href}" rel="noopener noreferrer">{title}</a>'
+                    f"</li>"
+                )
+            else:
+                parts.append(
+                    f'<li value="{it.rank}">'
+                    f'<a href="{href}" rel="noopener noreferrer">'
+                    f"<strong>{primary_esc}</strong></a>"
+                    f"</li>"
+                )
         else:
             parts.append(
-                f'<li value="{it.rank}"><strong>{name_esc}</strong><br>{title}</li>'
+                f'<li value="{it.rank}"><strong>{primary_esc}</strong></li>'
             )
     parts.append("</ol>")
 

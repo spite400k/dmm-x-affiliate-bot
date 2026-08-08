@@ -147,9 +147,82 @@ def test_build_ranking_blog_html_lists_and_links(sample_page: RankingPage) -> No
     assert "ランキングページを見る" in html
 
 
+def test_rank_label_single_actress_uses_name() -> None:
+    item = RankingItem(1, "長い作品タイトル", actress="白石るな")
+    assert mwr._rank_label(item) == "白石るな"
+
+
+def test_rank_label_no_actress_uses_title() -> None:
+    item = RankingItem(1, "禁断の情事 息子に寝取られた五十路母", actress="")
+    assert "禁断の情事" in mwr._rank_label(item)
+
+
+def test_rank_label_multi_actress_field_empty_uses_title() -> None:
+    """enrich 後は複数女優だと actress が空になる想定。"""
+    item = RankingItem(1, "共演作品のタイトルです", actress="")
+    label = mwr._rank_label(item)
+    assert "共演作品" in label
+
+
 def test_parse_actress_names_from_json() -> None:
     raw = '[{"id":1,"name":"白石るな","ruby":"しらいしるな"}]'
     assert mwr._parse_actress_names(raw) == ["白石るな"]
+    multi = (
+        '[{"id":1,"name":"A"},{"id":2,"name":"B"}]'
+    )
+    assert mwr._parse_actress_names(multi) == ["A", "B"]
+
+
+def test_enrich_sets_actress_only_when_exactly_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeTable:
+        def select(self, *_a, **_k):
+            return self
+
+        def in_(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            return type(
+                "R",
+                (),
+                {
+                    "data": [
+                        {
+                            "content_id": "one",
+                            "actress": '[{"name":"白石るな"}]',
+                        },
+                        {
+                            "content_id": "multi",
+                            "actress": '[{"name":"A"},{"name":"B"}]',
+                        },
+                        {"content_id": "none", "actress": None},
+                    ]
+                },
+            )()
+
+    class _FakeSb:
+        def table(self, _name: str):
+            return _FakeTable()
+
+    monkeypatch.setattr(
+        "db.supabase_client.init_supabase", lambda _aid: _FakeSb()
+    )
+    page = RankingPage(
+        headline="t",
+        updated="",
+        items=[
+            RankingItem(1, "t1", url="https://www.fanzaportal.com/videoa/one"),
+            RankingItem(2, "t2", url="https://www.fanzaportal.com/videoa/multi"),
+            RankingItem(3, "t3", url="https://www.fanzaportal.com/videoa/none"),
+        ],
+    )
+    mwr.enrich_ranking_actresses("2", page)
+    assert page.items[0].actress == "白石るな"
+    assert page.items[1].actress == ""
+    assert page.items[2].actress == ""
+    assert mwr._rank_label(page.items[0]) == "白石るな"
+    assert mwr._rank_label(page.items[1]) == "t2"
+    assert mwr._rank_label(page.items[2]) == "t3"
 
 
 def test_log_ranking_post_content_does_not_raise(
