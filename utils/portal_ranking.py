@@ -24,6 +24,7 @@ DEFAULT_HEADERS = {
 class RankingItem:
     rank: int
     title: str
+    url: str = ""
 
 
 @dataclass
@@ -31,6 +32,23 @@ class RankingPage:
     headline: str
     updated: str
     items: list[RankingItem]
+
+
+def _absolute_portal_url(page_url: str, href: str) -> str:
+    h = (href or "").strip()
+    if not h:
+        return ""
+    if h.startswith("http://") or h.startswith("https://"):
+        return h
+    if "fanzaportal.com" in page_url:
+        origin = "https://www.fanzaportal.com"
+    elif "dmmportal.jp" in page_url:
+        origin = "https://www.dmmportal.jp"
+    else:
+        return h
+    if h.startswith("/"):
+        return origin + h
+    return f"{origin}/{h}"
 
 # ---------------------
 # ランキングHTML取得
@@ -50,7 +68,7 @@ def _norm_ws(s: str) -> str:
 # ---------------------
 # FANZA Portal 週間ランキングパース
 # ---------------------
-def parse_fanza_portal_weekly(html: str) -> RankingPage | None:
+def parse_fanza_portal_weekly(html: str, *, page_url: str = "") -> RankingPage | None:
     """www.fanzaportal.com の週間ランキング SSR HTML をパースする。"""
     soup = BeautifulSoup(html, "html.parser")
     h1 = soup.select_one("main h1.text-2xl")
@@ -64,6 +82,7 @@ def parse_fanza_portal_weekly(html: str) -> RankingPage | None:
     updated_el = soup.select_one("main p.text-sm.text-gray-500.mb-6")
     updated = _norm_ws(updated_el.get_text()) if updated_el else ""
 
+    base = page_url or "https://www.fanzaportal.com/"
     items: list[RankingItem] = []
     for art in soup.select('main article[id^="rank-"]'):
         rid = art.get("id") or ""
@@ -75,8 +94,9 @@ def parse_fanza_portal_weekly(html: str) -> RankingPage | None:
         if not link:
             continue
         title = _norm_ws(link.get_text())
+        href = _absolute_portal_url(base, str(link.get("href") or ""))
         if title:
-            items.append(RankingItem(rank=rank, title=title))
+            items.append(RankingItem(rank=rank, title=title, url=href))
 
     items.sort(key=lambda x: x.rank)
     if not items:
@@ -87,7 +107,7 @@ def parse_fanza_portal_weekly(html: str) -> RankingPage | None:
 # ---------------------
 # DMM Portal 週間ランキングパース
 # ---------------------
-def parse_dmm_portal_weekly(html: str) -> RankingPage | None:
+def parse_dmm_portal_weekly(html: str, *, page_url: str = "") -> RankingPage | None:
     """www.dmmportal.jp の週間ランキング SSR HTML をパースする。"""
     soup = BeautifulSoup(html, "html.parser")
     h1 = soup.select_one("main h1.text-2xl")
@@ -106,6 +126,7 @@ def parse_dmm_portal_weekly(html: str) -> RankingPage | None:
         logger.warning("DMM Portal: ランキングの ol が見つかりません")
         return None
 
+    base = page_url or "https://www.dmmportal.jp/"
     items: list[RankingItem] = []
     for li in ol.find_all("li", recursive=False):
         h2 = li.find("h2")
@@ -120,8 +141,9 @@ def parse_dmm_portal_weekly(html: str) -> RankingPage | None:
             continue
         rank = int(m.group(1))
         title = _norm_ws(link.get_text())
+        href = _absolute_portal_url(base, str(link.get("href") or ""))
         if title:
-            items.append(RankingItem(rank=rank, title=title))
+            items.append(RankingItem(rank=rank, title=title, url=href))
 
     items.sort(key=lambda x: x.rank)
     if not items:
@@ -134,9 +156,9 @@ def parse_dmm_portal_weekly(html: str) -> RankingPage | None:
 # ---------------------
 def parse_weekly_ranking_page(url: str, html: str) -> RankingPage | None:
     if "fanzaportal.com" in url:
-        return parse_fanza_portal_weekly(html)
+        return parse_fanza_portal_weekly(html, page_url=url)
     if "dmmportal.jp" in url:
-        return parse_dmm_portal_weekly(html)
+        return parse_dmm_portal_weekly(html, page_url=url)
     logger.error("未対応のポータル URL です: %s", url)
     return None
 

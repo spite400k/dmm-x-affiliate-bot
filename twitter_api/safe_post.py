@@ -58,7 +58,11 @@ def safe_post_tweet(
         except tweepy.errors.Forbidden as e:
             detail = getattr(e.response, "text", None) or str(e)
             logger.critical(
-                "❌ 権限エラー。プランまたはトークン確認。API詳細: %s",
+                "❌ 権限エラー(403)。Developer Portal で次を確認: "
+                "①アプリ User authentication が Read and write "
+                "②権限変更後に Access Token を再発行して .env の "
+                "ACCESS_TOKEN_* / ACCESS_TOKEN_SECRET_* を更新 "
+                "③有料プランで Tweet write が使えること。API詳細: %s",
                 detail[:2000] if detail else "(なし)",
             )
             return None

@@ -1,0 +1,50 @@
+name: Weekly ranking (X + Livedoor)
+
+# 月曜 21:00 JST = 月曜 12:00 UTC
+on:
+  schedule:
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+jobs:
+  weekly-ranking:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create .env file from secrets
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL_2 }}" >> .env
+          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY_2 }}" >> .env
+          echo "SUPABASE_URL_2=${{ secrets.SUPABASE_URL_2 }}" >> .env
+          echo "SUPABASE_KEY_2=${{ secrets.SUPABASE_KEY_2 }}" >> .env
+          echo "API_KEY_2=${{ secrets.API_KEY_2 }}" >> .env
+          echo "API_SECRET_KEY_2=${{ secrets.API_SECRET_KEY_2 }}" >> .env
+          echo "ACCESS_TOKEN_2=${{ secrets.ACCESS_TOKEN_2 }}" >> .env
+          echo "ACCESS_TOKEN_SECRET_2=${{ secrets.ACCESS_TOKEN_SECRET_2 }}" >> .env
+          echo "BEARER_TOKEN_2=${{ secrets.BEARER_TOKEN_2 }}" >> .env
+
+      - name: Post weekly ranking (videoa → X + Livedoor)
+        run: python main_weekly_ranking.py
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: debug-artifacts-weekly-ranking
+          path: |
+            debug*.html
+            debug*.png
+            logs/**
+          if-no-files-found: ignore

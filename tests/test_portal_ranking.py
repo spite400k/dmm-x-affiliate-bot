@@ -68,6 +68,8 @@ def test_parse_fanza_portal_weekly_minimal() -> None:
     assert ranks == [1, 2]
     assert page.items[0].title == "1位の作品タイトル"
     assert page.items[1].title == "2位の作品タイトル"
+    assert page.items[0].url.endswith("/videoa/bbb")
+    assert page.items[1].url.endswith("/videoa/aaa")
 
 
 def test_parse_dmm_portal_weekly_minimal() -> None:
@@ -79,6 +81,8 @@ def test_parse_dmm_portal_weekly_minimal() -> None:
     assert [x.rank for x in page.items] == [1, 2]
     assert page.items[0].title == "テストコミックA"
     assert page.items[1].title == "テストコミックB"
+    assert page.items[0].url.endswith("/ebook/comic/x")
+    assert page.items[1].url.endswith("/ebook/comic/y")
 
 
 def test_parse_weekly_ranking_page_dispatches_by_url() -> None:
