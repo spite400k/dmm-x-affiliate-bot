@@ -7,12 +7,14 @@ import pytest
 from livedoor_blog.post import (
     _ATOMPUB_TITLE_MAX_CHARS,
     _CATCHY_MOBILE_VISIBLE,
+    _build_amateur_av_catchy_title,
     _build_comic_mobile_catchy_title,
     _build_mobile_catchy_title,
     _build_photo_mobile_catchy_title,
     _comic_work_title,
     _extract_quoted_work_title,
     _fit_photo_name_work_lead,
+    _fit_pipe_lead,
     _photobook_work_title,
     _strip_edition_noise,
     _strip_trailing_credit,
@@ -243,3 +245,104 @@ def test_blog_post_title_doujin_prefers_author_over_maker() -> None:
     assert got.startswith("著者A｜『生殖のため生まれた猿ども』")
     assert "サークルB" not in got
     assert "単話" not in got
+
+
+def test_fit_pipe_lead_keeps_series_attr_name() -> None:
+    got = _fit_pipe_lead(["シロウトTV", "人妻", "みなみ"])
+    assert got == "シロウトTV｜人妻｜みなみ"
+    assert len(got) <= _CATCHY_MOBILE_VISIBLE
+
+
+def test_fit_pipe_lead_truncates_long_series() -> None:
+    long_series = "とても長いシリーズ名で可視枠を超えそうなレーベルです"
+    got = _fit_pipe_lead([long_series, "みなみ"])
+    assert "みなみ" in got
+    assert len(got) <= _CATCHY_MOBILE_VISIBLE
+
+
+def test_build_amateur_av_catchy_uses_series_and_attr() -> None:
+    item = {
+        "service": "digital",
+        "floor": "videoc",
+        "series": "シロウトTV",
+        "genres": ["人妻", "素人"],
+        "actress": [{"name": "みなみ"}],
+    }
+    got = _build_amateur_av_catchy_title("みなみ", item, ["みなみ"])
+    assert got.startswith("シロウトTV｜人妻｜みなみ")
+    assert got.endswith("｜レビュー")
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "シロウトTV" in visible
+    assert "みなみ" in visible
+    assert got != "みなみ｜レビュー"
+
+
+def test_blog_post_title_videoc_avoids_name_only() -> None:
+    title = "みな"
+    item = {
+        "service": "digital",
+        "floor": "videoc",
+        "actress": [{"name": "みな"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.endswith("｜レビュー")
+    assert got != "みな｜レビュー"
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "素人" in visible
+    assert "みな" in visible
+
+
+def test_blog_post_title_videoc_mirei_with_hatsudori() -> None:
+    title = "MIREI"
+    item = {
+        "service": "digital",
+        "floor": "videoc",
+        "actress": [{"name": "MIREI"}],
+        "genres": ["初撮り", "素人"],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("初撮り｜MIREI")
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "初撮り" in visible
+    assert "MIREI" in visible
+
+
+def test_blog_post_title_videoc_two_names() -> None:
+    title = "ゆみ＆ひなこ"
+    item = {
+        "service": "digital",
+        "floor": "videoc",
+        "series": "ラグジュTV",
+        "actress": [{"name": "ゆみ"}, {"name": "ひなこ"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("ラグジュTV｜")
+    assert "ゆみ＆ひなこ" in got
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "ラグジュTV" in visible
+
+
+def test_blog_post_title_videoa_amateur_signal() -> None:
+    title = "素人ナンパ 虹野"
+    item = {
+        "service": "digital",
+        "floor": "videoa",
+        "actress": [{"name": "虹野"}],
+        "genres": ["素人", "ナンパ"],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got != "虹野｜レビュー"
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "ナンパ" in visible or "素人" in visible
+
+
+def test_blog_post_title_videoa_pro_keeps_actress_hook() -> None:
+    title = "高身長の貧困女学生は小さいおじさん達に群がられ貪られ春を売る。 明日葉みつは"
+    item = {
+        "actress": [{"name": "明日葉みつは"}],
+        "service": "digital",
+        "floor": "videoa",
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("明日葉みつは｜高身長")
+    assert "｜レビュー" in got

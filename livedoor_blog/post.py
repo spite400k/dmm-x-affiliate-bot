@@ -33,6 +33,8 @@ Playwright:
     「人名｜『写真集名』｜レビュー」形式へ整形し、先頭約30字に人名＋作品名を固定する。
   漫画・同人（ebook/comic または doujin）は
     「作者orサークル｜『作品名』｜レビュー」とし、【FANZA限定版】(単話)・モザイク版などは先頭に出さない。
+  素人AV（videoc、または videoa で素人シグナルあり）は
+    「シリーズor属性｜名前｜レビュー」とし、名前だけのタイトルに潰さない。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
   account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
@@ -70,7 +72,8 @@ def _fit_atompub_title(title: str) -> str:
 
 
 # スマホのカテゴリ新着は先頭〜30字前後しか見えない想定。
-# 写真集（photo）は「人名｜写真集名」、漫画・同人は「作者orサークル｜作品名」をこの可視枠に固定する。
+# 写真集（photo）は「人名｜写真集名」、漫画・同人は「作者orサークル｜作品名」、
+# 素人AVは「シリーズor属性｜名前」をこの可視枠に固定する。
 # それ以外は名前＋フックを前に寄せる。
 _CATCHY_MOBILE_VISIBLE = 30
 _CATCHY_MOBILE_HOOK_MAX = 36
@@ -81,6 +84,19 @@ _QUOTED_WORK_RE = re.compile(r"[『「]([^』」]{1,40})[』」]")
 _EDITION_BRACKET_RE = re.compile(r"【[^】]+】")
 _TANKAWA_RE = re.compile(r"[（(\[［]単話[）)\]］]")
 _MOSAIC_EDITION_RE = re.compile(r"モザイク版")
+_AMATEUR_SIGNAL_RE = re.compile(r"素人|シロウト|しろうと|amateur", re.IGNORECASE)
+_AMATEUR_SERIES_KEYS = ("シロウトTV", "ラグジュTV", "ナンパTV")
+_AMATEUR_ATTR_PRIORITY = (
+    "初撮り",
+    "人妻",
+    "熟女",
+    "ナンパ",
+    "ギャル",
+    "清楚",
+    "女子大生",
+    "地方",
+    "素人",
+)
 
 
 def _fit_catchy_title(hook: str, core: str, tail: str) -> str:
@@ -1217,6 +1233,120 @@ def _build_comic_mobile_catchy_title(
     return _fit_catchy_title(head, "", cta)
 
 
+def _is_amateur_av_item(item: dict[str, Any] | None) -> bool:
+    """videoc、または videoa 等で素人シグナルがある作品。"""
+    if not item:
+        return False
+    floor = _item_str(item.get("floor")).lower()
+    if floor == "videoc":
+        return True
+    blob = " ".join(
+        [
+            _item_str(item.get("series")),
+            _item_str(item.get("maker")),
+            _item_str(item.get("category_name")),
+            _item_str(item.get("title")),
+            " ".join(_normalize_genres(item.get("genres"))),
+        ]
+    )
+    if not _AMATEUR_SIGNAL_RE.search(blob):
+        return False
+    service = _item_str(item.get("service")).lower()
+    return floor in ("videoa", "videoc") or service in ("digital", "")
+
+
+def _amateur_series_label(item: dict[str, Any], title: str) -> str:
+    """シリーズ／メーカーから新着向けの短いレーベル名を取る。"""
+    series = _item_str(item.get("series"))
+    maker = _item_str(item.get("maker"))
+    blob = f"{series} {maker} {title}"
+    for key in _AMATEUR_SERIES_KEYS:
+        if key in blob:
+            return key
+    raw = _strip_edition_noise(series or maker)
+    raw = re.split(r"[（(／/]", raw, maxsplit=1)[0].strip()
+    if len(raw) > 12:
+        raw = raw[:11] + "…"
+    return raw
+
+
+def _pick_amateur_attr(*, series: str, blob: str) -> str:
+    """ジャンル・タイトルから短い属性語を1つ。シリーズに含まれる語は重複させない。"""
+    for attr in _AMATEUR_ATTR_PRIORITY:
+        if attr in blob and attr not in series:
+            return attr
+    if not series:
+        return "素人"
+    return ""
+
+
+def _format_amateur_name_label(names: list[str]) -> str:
+    cleaned = [n.strip() for n in names if (n or "").strip()][:2]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    return f"{cleaned[0]}＆{cleaned[1]}"
+
+
+def _fit_pipe_lead(
+    parts: list[str], *, max_len: int = _CATCHY_MOBILE_VISIBLE
+) -> str:
+    """『』なしの「A｜B｜C」を可視枠に収める。溢れたら末尾（名前）から落とす。"""
+    tokens: list[str] = []
+    for p in parts:
+        t = (p or "").strip()
+        if not t:
+            continue
+        if any(t == x or t in x for x in tokens):
+            continue
+        tokens.append(t)
+    if not tokens:
+        return "素人"
+
+    def joined(ts: list[str]) -> str:
+        return "｜".join(ts)
+
+    while len(tokens) > 2 and len(joined(tokens)) > max_len:
+        tokens.pop()
+    s = joined(tokens)
+    if len(s) <= max_len:
+        return s
+    rest = ("｜" + joined(tokens[1:])) if len(tokens) > 1 else ""
+    budget = max_len - len(rest)
+    if budget >= 2:
+        tokens[0] = tokens[0][: budget - 1] + "…"
+        return joined(tokens)
+    return tokens[0][: max_len - 1] + "…"
+
+
+def _build_amateur_av_catchy_title(
+    core: str,
+    item: dict[str, Any],
+    names: list[str],
+) -> str:
+    """素人AV向け: 先頭30字を「シリーズor属性｜名前」に固定する。
+
+    形式: {シリーズ}｜{属性}｜{名前}｜レビュー
+    名前だけの「みな｜レビュー」にはしない。
+    """
+    series = _amateur_series_label(item, core)
+    blob = " ".join(
+        [
+            core,
+            series,
+            _item_str(item.get("maker")),
+            " ".join(_normalize_genres(item.get("genres"))),
+        ]
+    )
+    attr = _pick_amateur_attr(series=series, blob=blob)
+    name = _format_amateur_name_label(names)
+    head = _fit_pipe_lead([series, attr, name])
+    if _title_already_has_cta(head):
+        return _fit_atompub_title(head)
+    return _fit_catchy_title(head, "", _CATCHY_CTA)
+
+
 def blog_post_title_for_item(
     title: str,
     item: dict[str, Any] | None = None,
@@ -1226,6 +1356,7 @@ def blog_post_title_for_item(
 
     写真集（ebook/photo）は先頭約30字を「人名｜『写真集名』」に固定する。
     漫画・同人は「作者orサークル｜『作品名』」に固定する。
+    素人AVは「シリーズor属性｜名前」に固定する。
     LIVEDOOR_CATCHY_TITLE=0 でオフ（元タイトルのまま）。
     """
     raw = os.environ.get("LIVEDOOR_CATCHY_TITLE", "1").strip().lower()
@@ -1251,6 +1382,10 @@ def blog_post_title_for_item(
         return _build_comic_mobile_catchy_title(
             core, comic_names, digital_bonus=bonus
         )
+
+    # 素人AV: 名前だけに潰さず、シリーズ／属性を先頭固定
+    if _is_amateur_av_item(item):
+        return _build_amateur_av_catchy_title(core, item or {}, names)
 
     if bonus and core:
         if tone == "novel":
