@@ -1,0 +1,9 @@
+---
+description: テスト方針
+alwaysApply: true
+---
+
+# テスト
+
+- Python: pytest（`tests/`）。機能追加・バグ修正時はテストを追加する。
+- 実行例: `.venv/bin/pytest -q`

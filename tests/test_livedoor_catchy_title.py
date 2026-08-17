@@ -6,7 +6,12 @@ import pytest
 
 from livedoor_blog.post import (
     _ATOMPUB_TITLE_MAX_CHARS,
+    _CATCHY_MOBILE_VISIBLE,
     _build_mobile_catchy_title,
+    _build_photo_mobile_catchy_title,
+    _extract_quoted_work_title,
+    _fit_photo_name_work_lead,
+    _photobook_work_title,
     _strip_trailing_credit,
     _title_hook_front,
     blog_post_title_for_item,
@@ -65,7 +70,71 @@ def test_blog_post_title_without_credit_still_shortens() -> None:
     assert got.startswith("ガテン女上司")
 
 
-def test_ebook_bonus_title_is_compact() -> None:
+def test_extract_quoted_work_title() -> None:
+    assert _extract_quoted_work_title("菊地ひな『グラビアバイブル』レビュー") == (
+        "グラビアバイブル"
+    )
+    assert _extract_quoted_work_title("市川愛美 「純愛」 写真集") == "純愛"
+    assert _extract_quoted_work_title("括弧なしタイトル") == ""
+
+
+def test_photobook_work_title_prefers_quotes() -> None:
+    core = "いじらしさと大人っぽさがまぶしい…『初写真集』 白石真菜"
+    assert _photobook_work_title(core, ["白石真菜"]) == "初写真集"
+
+
+def test_photobook_work_title_falls_back_to_core() -> None:
+    core = "ひなぼーる ぷっくりおしりとみずみずしい肌 菊地ひな"
+    assert _photobook_work_title(core, ["菊地ひな"]) == (
+        "ひなぼーる ぷっくりおしりとみずみずしい肌"
+    )
+
+
+def test_fit_photo_name_work_lead_fits_mobile_visible() -> None:
+    lead = _fit_photo_name_work_lead("菊地ひな", "グラビアバイブル")
+    assert lead == "菊地ひな｜『グラビアバイブル』"
+    assert len(lead) <= _CATCHY_MOBILE_VISIBLE
+
+
+def test_fit_photo_name_work_lead_truncates_long_work() -> None:
+    long_work = "とても長い写真集のタイトルで可視枠を超えそうな名前です"
+    lead = _fit_photo_name_work_lead("篠崎愛", long_work)
+    assert lead.startswith("篠崎愛｜『")
+    assert lead.endswith("』")
+    assert len(lead) <= _CATCHY_MOBILE_VISIBLE
+
+
+def test_build_photo_mobile_catchy_title() -> None:
+    got = _build_photo_mobile_catchy_title(
+        "菊地ひな『グラビアバイブル』公式ガイド",
+        ["菊地ひな"],
+    )
+    assert got.startswith("菊地ひな｜『グラビアバイブル』")
+    assert got.endswith("｜レビュー")
+    assert len(got[:_CATCHY_MOBILE_VISIBLE]) <= _CATCHY_MOBILE_VISIBLE
+    # 可視枠内に人名と作品名が含まれる
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "菊地ひな" in visible
+    assert "グラビアバイブル" in visible
+
+
+def test_blog_post_title_photo_uses_name_and_work() -> None:
+    title = "いじらしさと大人っぽさがまぶしい…白石真菜『初写真集』"
+    item = {
+        "service": "ebook",
+        "floor": "photo",
+        "author": [{"name": "白石真菜"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("白石真菜｜『初写真集』")
+    assert got.endswith("｜レビュー")
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "白石真菜" in visible
+    assert "初写真集" in visible
+
+
+def test_ebook_photo_bonus_keeps_name_work_in_front() -> None:
+    """電子特典でも【電子版…】を先頭に付けず、人名｜作品名を可視枠に残す。"""
     title = "【電子版限定特典付き】なにかの写真集タイトルがとても長い場合の例です 誰か"
     item = {
         "service": "ebook",
@@ -73,6 +142,22 @@ def test_ebook_bonus_title_is_compact() -> None:
         "author": [{"name": "誰か"}],
     }
     got = blog_post_title_for_item(title, item)
-    assert "【電子版" in got
+    assert got.startswith("誰か｜『")
+    assert "電子特典レビュー" in got
+    assert not got.startswith("【電子版")
+    assert len(got) <= _ATOMPUB_TITLE_MAX_CHARS
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "誰か" in visible
+
+
+def test_ebook_comic_bonus_title_still_uses_prefix() -> None:
+    title = "【電子版限定特典付き】なにかのコミックタイトルがとても長い場合の例です 誰か"
+    item = {
+        "service": "ebook",
+        "floor": "comic",
+        "author": [{"name": "誰か"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert "【電子版描き下ろし】" in got
     assert "誰か" in got
     assert len(got) <= _ATOMPUB_TITLE_MAX_CHARS
