@@ -7,11 +7,14 @@ import pytest
 from livedoor_blog.post import (
     _ATOMPUB_TITLE_MAX_CHARS,
     _CATCHY_MOBILE_VISIBLE,
+    _build_comic_mobile_catchy_title,
     _build_mobile_catchy_title,
     _build_photo_mobile_catchy_title,
+    _comic_work_title,
     _extract_quoted_work_title,
     _fit_photo_name_work_lead,
     _photobook_work_title,
+    _strip_edition_noise,
     _strip_trailing_credit,
     _title_hook_front,
     blog_post_title_for_item,
@@ -150,7 +153,8 @@ def test_ebook_photo_bonus_keeps_name_work_in_front() -> None:
     assert "誰か" in visible
 
 
-def test_ebook_comic_bonus_title_still_uses_prefix() -> None:
+def test_ebook_comic_bonus_keeps_author_work_in_front() -> None:
+    """漫画の電子特典でも【電子版…】を先頭に付けず、作者｜作品名を可視枠に残す。"""
     title = "【電子版限定特典付き】なにかのコミックタイトルがとても長い場合の例です 誰か"
     item = {
         "service": "ebook",
@@ -158,6 +162,84 @@ def test_ebook_comic_bonus_title_still_uses_prefix() -> None:
         "author": [{"name": "誰か"}],
     }
     got = blog_post_title_for_item(title, item)
-    assert "【電子版描き下ろし】" in got
-    assert "誰か" in got
+    assert got.startswith("誰か｜『")
+    assert "電子特典レビュー" in got
+    assert "【電子版描き下ろし】" not in got
     assert len(got) <= _ATOMPUB_TITLE_MAX_CHARS
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "誰か" in visible
+
+
+def test_strip_edition_noise_drops_fanza_and_tankawa() -> None:
+    raw = "秘め妻【デジタル特装版】【FANZA限定版】"
+    assert _strip_edition_noise(raw) == "秘め妻"
+    assert _strip_edition_noise("メイド教育。ー没落貴族 瑠璃川椿ー(単話)") == (
+        "メイド教育。ー没落貴族 瑠璃川椿ー"
+    )
+    assert _strip_edition_noise("VIP限定 SEXバーへようこそ モザイク版") == (
+        "VIP限定 SEXバーへようこそ"
+    )
+
+
+def test_comic_work_title_uses_first_clause() -> None:
+    core = "メイド教育。ー没落貴族 瑠璃川椿ー(単話)"
+    assert _comic_work_title(core, []) == "メイド教育"
+
+
+def test_build_comic_mobile_catchy_title() -> None:
+    got = _build_comic_mobile_catchy_title(
+        "秘め妻【デジタル特装版】【FANZA限定版】",
+        ["某作者"],
+    )
+    assert got.startswith("某作者｜『秘め妻』")
+    assert got.endswith("｜レビュー")
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "某作者" in visible
+    assert "秘め妻" in visible
+    assert "FANZA" not in visible
+    assert "デジタル特装" not in visible
+
+
+def test_blog_post_title_comic_uses_author_and_work() -> None:
+    title = "残クレアルフォード元ヤン人妻（32歳３人子持ちママ）を家に連れ込んだら"
+    item = {
+        "service": "ebook",
+        "floor": "comic",
+        "author": [{"name": "山田太郎"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("山田太郎｜『")
+    assert got.endswith("｜レビュー")
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "山田太郎" in visible
+    assert "FANZA" not in got
+    assert "【デジタル" not in got
+
+
+def test_blog_post_title_doujin_uses_circle_maker() -> None:
+    title = "VIP限定 SEXバーへようこそ モザイク版"
+    item = {
+        "service": "doujin",
+        "floor": "digital_doujin",
+        "maker": "某サークル",
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("某サークル｜『VIP限定 SEXバーへようこそ』")
+    assert got.endswith("｜レビュー")
+    assert "モザイク版" not in got
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert "某サークル" in visible
+
+
+def test_blog_post_title_doujin_prefers_author_over_maker() -> None:
+    title = "生殖のため生まれた猿ども (単話)"
+    item = {
+        "service": "doujin",
+        "floor": "digital_doujin",
+        "author": [{"name": "著者A"}],
+        "maker": "サークルB",
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("著者A｜『生殖のため生まれた猿ども』")
+    assert "サークルB" not in got
+    assert "単話" not in got

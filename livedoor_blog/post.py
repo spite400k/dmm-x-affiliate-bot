@@ -31,6 +31,8 @@ Playwright:
   記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
   写真集（ebook floor=photo）のタイトルはカテゴリ新着向けに
     「人名｜『写真集名』｜レビュー」形式へ整形し、先頭約30字に人名＋作品名を固定する。
+  漫画・同人（ebook/comic または doujin）は
+    「作者orサークル｜『作品名』｜レビュー」とし、【FANZA限定版】(単話)・モザイク版などは先頭に出さない。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
   account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
@@ -68,7 +70,7 @@ def _fit_atompub_title(title: str) -> str:
 
 
 # スマホのカテゴリ新着は先頭〜30字前後しか見えない想定。
-# 写真集（photo）は分析どおり「人名｜写真集名」をこの可視枠に固定する。
+# 写真集（photo）は「人名｜写真集名」、漫画・同人は「作者orサークル｜作品名」をこの可視枠に固定する。
 # それ以外は名前＋フックを前に寄せる。
 _CATCHY_MOBILE_VISIBLE = 30
 _CATCHY_MOBILE_HOOK_MAX = 36
@@ -76,6 +78,9 @@ _CATCHY_CTA = "｜レビュー"
 _CATCHY_CTA_ALT = "｜チェック"
 _CATCHY_CTA_PHOTO_BONUS = "｜電子特典レビュー"
 _QUOTED_WORK_RE = re.compile(r"[『「]([^』」]{1,40})[』」]")
+_EDITION_BRACKET_RE = re.compile(r"【[^】]+】")
+_TANKAWA_RE = re.compile(r"[（(\[［]単話[）)\]］]")
+_MOSAIC_EDITION_RE = re.compile(r"モザイク版")
 
 
 def _fit_catchy_title(hook: str, core: str, tail: str) -> str:
@@ -1079,15 +1084,17 @@ def _photobook_work_title(core: str, names: list[str]) -> str:
     return s or body.strip() or (core or "").strip()
 
 
-def _fit_photo_name_work_lead(lead: str, work: str) -> str:
-    """カテゴリ新着の可視枠（先頭30字）に収まる「人名｜『作品名』」を返す。"""
+def _fit_name_work_lead(
+    lead: str, work: str, *, fallback: str = "作品"
+) -> str:
+    """カテゴリ新着の可視枠（先頭30字）に収まる「名前｜『作品名』」を返す。"""
     name = (lead or "").strip()
-    w = (work or "").strip() or "写真集"
+    w = (work or "").strip() or fallback
     prefix = f"{name}｜" if name else ""
     # 『』の2文字分を予算から引く
     budget = _CATCHY_MOBILE_VISIBLE - len(prefix) - 2
     if budget < 1:
-        # 人名が長すぎる場合は人名側を短縮し、作品は最低1文字残す
+        # 名前が長すぎる場合は名前側を短縮し、作品は最低1文字残す
         max_name = max(1, _CATCHY_MOBILE_VISIBLE - 4)
         name = name[: max_name - 1] + "…"
         prefix = f"{name}｜"
@@ -1095,6 +1102,11 @@ def _fit_photo_name_work_lead(lead: str, work: str) -> str:
     if len(w) > budget:
         w = w[: budget - 1] + "…" if budget > 1 else w[:1]
     return f"{prefix}『{w}』"
+
+
+def _fit_photo_name_work_lead(lead: str, work: str) -> str:
+    """写真集向けの「人名｜『写真集名』」。"""
+    return _fit_name_work_lead(lead, work, fallback="写真集")
 
 
 def _build_photo_mobile_catchy_title(
@@ -1119,6 +1131,92 @@ def _build_photo_mobile_catchy_title(
     return _fit_catchy_title(head, "", cta)
 
 
+def _is_comic_or_doujin_item(item: dict[str, Any] | None) -> bool:
+    """ebook/comic または doujin フロアなら True。"""
+    if not item:
+        return False
+    service = _item_str(item.get("service")).lower()
+    floor = _item_str(item.get("floor")).lower()
+    if service == "doujin" or "doujin" in floor:
+        return True
+    return _ebook_editorial_tone(item) == "comic"
+
+
+def _comic_doujin_credit_names(item: dict[str, Any] | None) -> list[str]:
+    """漫画は著者、同人はサークル（maker / circle）を先頭クレジットにする。"""
+    if not item:
+        return []
+    authors = _parse_credit_names(item.get("author"))
+    if authors:
+        return authors
+    circles = _parse_credit_names(item.get("circle"))
+    if circles:
+        return circles
+    maker = _item_str(item.get("maker"))
+    if maker:
+        return [maker]
+    return []
+
+
+def _strip_edition_noise(text: str) -> str:
+    """【FANZA限定版】(単話)・モザイク版など、新着の可視枠を食う販促語を除く。"""
+    s = _EDITION_BRACKET_RE.sub("", text or "")
+    s = _TANKAWA_RE.sub("", s)
+    s = _MOSAIC_EDITION_RE.sub("", s)
+    s = re.sub(r"[ \u3000]+", " ", s)
+    return s.strip(" 　/-－・|｜")
+
+
+def _comic_work_title(core: str, names: list[str]) -> str:
+    """漫画・同人の作品名。販促タグを除き、『』または短い芯を使う。"""
+    body = _strip_okuri_brackets(core) or (core or "").strip()
+    body = _strip_edition_noise(body)
+    if names:
+        body = _strip_trailing_credit(body, names)
+        body = _strip_edition_noise(body)
+    quoted = _extract_quoted_work_title(body)
+    if quoted:
+        return _strip_edition_noise(quoted) or quoted
+
+    s = body.strip()
+    for n in names:
+        n = (n or "").strip()
+        if n and s.startswith(n):
+            s = s[len(n) :].lstrip(" 　|｜:：/-－・")
+            break
+
+    for sep in ("。", "！", "!", "？", "?"):
+        if sep in s:
+            first = s.split(sep, 1)[0].strip()
+            if len(first) >= 2:
+                s = first
+                break
+
+    s = s.strip(" 　『』「」【】")
+    return s or body.strip() or (core or "").strip()
+
+
+def _build_comic_mobile_catchy_title(
+    core: str,
+    names: list[str],
+    *,
+    digital_bonus: bool = False,
+) -> str:
+    """漫画・同人向け: 先頭30字を「作者orサークル｜『作品名』」に固定する。
+
+    形式:
+      通常: {作者}｜『{作品名}』｜レビュー
+      電子特典: {作者}｜『{作品名}』｜電子特典レビュー
+    """
+    lead = (names[0] if names else "").strip()
+    work = _comic_work_title(core, names)
+    head = _fit_name_work_lead(lead, work, fallback="作品")
+    if _title_already_has_cta(head):
+        return _fit_atompub_title(head)
+    cta = _CATCHY_CTA_PHOTO_BONUS if digital_bonus else _CATCHY_CTA
+    return _fit_catchy_title(head, "", cta)
+
+
 def blog_post_title_for_item(
     title: str,
     item: dict[str, Any] | None = None,
@@ -1127,6 +1225,7 @@ def blog_post_title_for_item(
     """スマホのカテゴリ新着1行で目立つキャッチタイトルを生成する。
 
     写真集（ebook/photo）は先頭約30字を「人名｜『写真集名』」に固定する。
+    漫画・同人は「作者orサークル｜『作品名』」に固定する。
     LIVEDOOR_CATCHY_TITLE=0 でオフ（元タイトルのまま）。
     """
     raw = os.environ.get("LIVEDOOR_CATCHY_TITLE", "1").strip().lower()
@@ -1146,13 +1245,18 @@ def blog_post_title_for_item(
             core, names, digital_bonus=bonus
         )
 
+    # 漫画・同人: 販促タグを外し、作者／サークル＋作品名を先頭固定
+    if _is_comic_or_doujin_item(item):
+        comic_names = _comic_doujin_credit_names(item)
+        return _build_comic_mobile_catchy_title(
+            core, comic_names, digital_bonus=bonus
+        )
+
     if bonus and core:
         if tone == "novel":
             prefix = "【電子版特典】"
         elif tone == "otherbooks":
             prefix = "【電子版独占特典】"
-        elif tone == "comic":
-            prefix = "【電子版描き下ろし】"
         else:
             prefix = "【電子版限定カット】"
         body_src = _strip_trailing_credit(core, names) if names else core
