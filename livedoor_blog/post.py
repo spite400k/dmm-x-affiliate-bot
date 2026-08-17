@@ -29,6 +29,8 @@ Playwright:
     → ③サンプル画像 → ④ポータル（アフィリエイト）リンク
     → ⑤プレミアム宣伝（site/account 別・アフィリエイト URL があるときのみ独立セクション）。
   記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
+  写真集（ebook floor=photo）のタイトルはカテゴリ新着向けに
+    「人名｜『写真集名』｜レビュー」形式へ整形し、先頭約30字に人名＋作品名を固定する。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
   account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
@@ -65,10 +67,15 @@ def _fit_atompub_title(title: str) -> str:
     return t[: _ATOMPUB_TITLE_MAX_CHARS - 1] + "…"
 
 
-# スマホのカテゴリ新着は先頭〜30字前後しか見えない想定。名前＋フックを前に寄せる。
+# スマホのカテゴリ新着は先頭〜30字前後しか見えない想定。
+# 写真集（photo）は分析どおり「人名｜写真集名」をこの可視枠に固定する。
+# それ以外は名前＋フックを前に寄せる。
+_CATCHY_MOBILE_VISIBLE = 30
 _CATCHY_MOBILE_HOOK_MAX = 36
 _CATCHY_CTA = "｜レビュー"
 _CATCHY_CTA_ALT = "｜チェック"
+_CATCHY_CTA_PHOTO_BONUS = "｜電子特典レビュー"
+_QUOTED_WORK_RE = re.compile(r"[『「]([^』」]{1,40})[』」]")
 
 
 def _fit_catchy_title(hook: str, core: str, tail: str) -> str:
@@ -1037,6 +1044,81 @@ def _build_mobile_catchy_title(core: str, names: list[str]) -> str:
     return _fit_catchy_title("", hook, cta)
 
 
+def _extract_quoted_work_title(text: str) -> str:
+    """『…』または「…」から作品名を取り出す（最初の一致）。"""
+    m = _QUOTED_WORK_RE.search(text or "")
+    if not m:
+        return ""
+    return m.group(1).strip()
+
+
+def _photobook_work_title(core: str, names: list[str]) -> str:
+    """写真集タイトル本体を推定する。『』優先、なければクレジット除去後の短い芯。"""
+    body = _strip_okuri_brackets(core) or (core or "").strip()
+    if names:
+        body = _strip_trailing_credit(body, names)
+    quoted = _extract_quoted_work_title(body)
+    if quoted:
+        return quoted
+
+    s = body.strip()
+    for n in names:
+        n = (n or "").strip()
+        if n and s.startswith(n):
+            s = s[len(n) :].lstrip(" 　|｜:：/-－・")
+            break
+
+    for sep in ("。", "！", "!", "？", "?"):
+        if sep in s:
+            first = s.split(sep, 1)[0].strip()
+            if len(first) >= 2:
+                s = first
+                break
+
+    s = s.strip(" 　『』「」【】")
+    return s or body.strip() or (core or "").strip()
+
+
+def _fit_photo_name_work_lead(lead: str, work: str) -> str:
+    """カテゴリ新着の可視枠（先頭30字）に収まる「人名｜『作品名』」を返す。"""
+    name = (lead or "").strip()
+    w = (work or "").strip() or "写真集"
+    prefix = f"{name}｜" if name else ""
+    # 『』の2文字分を予算から引く
+    budget = _CATCHY_MOBILE_VISIBLE - len(prefix) - 2
+    if budget < 1:
+        # 人名が長すぎる場合は人名側を短縮し、作品は最低1文字残す
+        max_name = max(1, _CATCHY_MOBILE_VISIBLE - 4)
+        name = name[: max_name - 1] + "…"
+        prefix = f"{name}｜"
+        budget = max(1, _CATCHY_MOBILE_VISIBLE - len(prefix) - 2)
+    if len(w) > budget:
+        w = w[: budget - 1] + "…" if budget > 1 else w[:1]
+    return f"{prefix}『{w}』"
+
+
+def _build_photo_mobile_catchy_title(
+    core: str,
+    names: list[str],
+    *,
+    digital_bonus: bool = False,
+) -> str:
+    """写真集向け: 先頭30字を「人名｜『写真集名』」に固定する。
+
+    形式:
+      通常: {人名}｜『{写真集名}』｜レビュー
+      電子特典: {人名}｜『{写真集名}』｜電子特典レビュー
+        （長い【電子版…】接頭辞は可視枠を食うため付けない）
+    """
+    lead = (names[0] if names else "").strip()
+    work = _photobook_work_title(core, names)
+    head = _fit_photo_name_work_lead(lead, work)
+    if _title_already_has_cta(head):
+        return _fit_atompub_title(head)
+    cta = _CATCHY_CTA_PHOTO_BONUS if digital_bonus else _CATCHY_CTA
+    return _fit_catchy_title(head, "", cta)
+
+
 def blog_post_title_for_item(
     title: str,
     item: dict[str, Any] | None = None,
@@ -1044,6 +1126,7 @@ def blog_post_title_for_item(
 ) -> str:
     """スマホのカテゴリ新着1行で目立つキャッチタイトルを生成する。
 
+    写真集（ebook/photo）は先頭約30字を「人名｜『写真集名』」に固定する。
     LIVEDOOR_CATCHY_TITLE=0 でオフ（元タイトルのまま）。
     """
     raw = os.environ.get("LIVEDOOR_CATCHY_TITLE", "1").strip().lower()
@@ -1055,8 +1138,13 @@ def blog_post_title_for_item(
     core = _strip_okuri_brackets(t) or t
     _, names = _primary_credit_label(item) if item else ("", [])
     bonus = _title_suggests_ebook_digital_bonus(t)
-    digest = _item_str(ai_review_row.get("review_digest")) if ai_review_row else ""
     tone = _ebook_editorial_tone(item) if item else "default"
+
+    # グラビア写真集: カテゴリ新着クリック用に人名＋作品名を先頭固定
+    if tone == "photo":
+        return _build_photo_mobile_catchy_title(
+            core, names, digital_bonus=bonus
+        )
 
     if bonus and core:
         if tone == "novel":
@@ -1069,8 +1157,6 @@ def blog_post_title_for_item(
             prefix = "【電子版限定カット】"
         body_src = _strip_trailing_credit(core, names) if names else core
         hook = _title_hook_front(body_src, max_len=28)
-        if tone == "photo" and ("王道" in digest or "王道" in core):
-            hook = _title_hook_front(f"王道グラビア {hook}", max_len=28)
         lead = (names[0] if names else "").strip()
         if lead and not hook.startswith(lead):
             return _fit_catchy_title(f"{prefix}{lead}｜", hook, _CATCHY_CTA)

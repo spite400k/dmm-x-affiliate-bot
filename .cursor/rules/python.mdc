@@ -1,0 +1,11 @@
+---
+description: Python 開発ルール
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python
+
+- 仮想環境は `.venv/`。実行・テストは `.venv` 経由。
+- 依存は `requirements.txt` で管理する。
+- 型ヒントと既存モジュールのスタイルを踏襲する。

@@ -14,3 +14,6 @@ logs/
 *.jpeg
 *.pdf
 __pycache__/
+.venv/
+venv/
+.pytest_cache/
