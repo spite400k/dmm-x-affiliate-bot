@@ -116,7 +116,7 @@ def test_build_photo_mobile_catchy_title() -> None:
         ["菊地ひな"],
     )
     assert got.startswith("菊地ひな｜『グラビアバイブル』")
-    assert got.endswith("｜レビュー")
+    assert got.endswith("｜写真集｜レビュー")
     assert len(got[:_CATCHY_MOBILE_VISIBLE]) <= _CATCHY_MOBILE_VISIBLE
     # 可視枠内に人名と作品名が含まれる
     visible = got[:_CATCHY_MOBILE_VISIBLE]
@@ -134,6 +134,7 @@ def test_blog_post_title_photo_uses_name_and_work() -> None:
     got = blog_post_title_for_item(title, item)
     assert got.startswith("白石真菜｜『初写真集』")
     assert got.endswith("｜レビュー")
+    assert "｜写真集｜レビュー" not in got
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert "白石真菜" in visible
     assert "初写真集" in visible
@@ -204,7 +205,7 @@ def test_build_comic_mobile_catchy_title() -> None:
     )
     assert got.startswith("秘め妻")
     assert "某作者" in got
-    assert got.endswith("｜レビュー")
+    assert got.endswith("｜コミック｜レビュー")
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert "秘め妻" in visible
     assert not visible.startswith("某作者")
@@ -222,7 +223,7 @@ def test_blog_post_title_comic_uses_author_and_work() -> None:
     got = blog_post_title_for_item(title, item)
     assert got.startswith("残クレアルフォード元ヤン人妻")
     assert "山田太郎" in got
-    assert got.endswith("｜レビュー")
+    assert got.endswith("｜コミック｜レビュー")
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert "残クレアルフォード" in visible
     assert "FANZA" not in got
@@ -242,6 +243,7 @@ def test_blog_post_title_comic_leads_with_work_not_publisher() -> None:
     assert got.startswith("ゾンビのあふれた世界で俺だけが襲われない")
     assert "4" in got
     assert "フロンティアワークス" in got
+    assert "｜コミック｜レビュー" in got
     assert "…" not in got
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert visible.startswith("ゾンビのあふれた")
@@ -259,7 +261,7 @@ def test_blog_post_title_comic_adds_genre_and_maker_when_no_author() -> None:
         "genres": ["人妻", "中出し", "成年コミック"],
     }
     got = blog_post_title_for_item(title, item)
-    assert got == "シングルマザーハウス｜人妻｜ヒット出版社｜レビュー"
+    assert got == "シングルマザーハウス｜人妻｜ヒット出版社｜コミック｜レビュー"
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert visible.startswith("シングルマザーハウス")
 
@@ -276,7 +278,7 @@ def test_blog_post_title_comic_keeps_search_query_volume() -> None:
     assert got.startswith("勇者に全部奪われた俺は勇者の母親とパーティを組みました")
     assert "7" in got
     assert "ある作者" in got
-    assert got.endswith("｜レビュー")
+    assert got.endswith("｜コミック｜レビュー")
     assert len(got) <= _ATOMPUB_TITLE_MAX_CHARS
 
 
@@ -290,7 +292,7 @@ def test_blog_post_title_doujin_uses_circle_maker() -> None:
     got = blog_post_title_for_item(title, item)
     assert got.startswith("VIP限定 SEXバーへようこそ")
     assert "某サークル" in got
-    assert got.endswith("｜レビュー")
+    assert got.endswith("｜同人誌｜レビュー")
     assert "モザイク版" not in got
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert "VIP限定" in visible
@@ -310,6 +312,7 @@ def test_blog_post_title_doujin_prefers_author_over_maker() -> None:
     assert "著者A" in got
     assert "サークルB" not in got
     assert "単話" not in got
+    assert got.endswith("｜同人誌｜レビュー")
 
 
 def test_fit_pipe_lead_keeps_series_attr_name() -> None:
@@ -366,6 +369,7 @@ def test_blog_post_title_videoc_avoids_name_only() -> None:
     got = blog_post_title_for_item(title, item)
     assert got.endswith("｜レビュー")
     assert got != "みな｜レビュー"
+    assert "｜AV｜" not in got
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert "素人" in visible
     assert "みな" in visible
@@ -465,7 +469,7 @@ def test_blog_post_title_videoa_pro_keeps_actress_hook() -> None:
     }
     got = blog_post_title_for_item(title, item)
     assert got.startswith("明日葉みつは｜高身長")
-    assert "｜レビュー" in got
+    assert got.endswith("｜AV｜レビュー")
 
 
 def test_comic_html_lead_contains_full_work_title() -> None:
@@ -490,3 +494,37 @@ def test_comic_html_lead_contains_full_work_title() -> None:
     assert "<strong>ゾンビのあふれた世界で俺だけが襲われない 4</strong>" in html
     assert "裏地ろくろ" in html
     assert html.index("ld-work-lead") < html.index("本作は原作小説")
+
+
+def test_blog_post_title_novel_appends_floor_type() -> None:
+    title = "星の名前を呼ぶまで"
+    item = {
+        "service": "ebook",
+        "floor": "novel",
+        "author": [{"name": "某著者"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.endswith("｜小説｜レビュー")
+    assert not got.startswith("小説")
+
+
+def test_blog_post_title_otherbooks_appends_floor_type() -> None:
+    title = "仕事が速くなる整理術"
+    item = {
+        "service": "ebook",
+        "floor": "otherbooks",
+        "author": [{"name": "某著者"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.endswith("｜実用書｜レビュー")
+
+
+def test_blog_post_title_anime_appends_floor_type() -> None:
+    title = "どこかのオリジナル作品"
+    item = {
+        "service": "digital",
+        "floor": "anime",
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.endswith("｜アニメ｜レビュー")
+    assert not got.startswith("アニメ")

@@ -30,13 +30,14 @@ Playwright:
     → ⑤プレミアム宣伝（site/account 別・アフィリエイト URL があるときのみ独立セクション）。
   記事タイトルは Atom の <title> のみ（本文内では h1 を出さず重複を避ける）。
   写真集（ebook floor=photo）のタイトルはカテゴリ新着向けに
-    「人名｜『写真集名』｜レビュー」形式へ整形し、先頭約30字に人名＋作品名を固定する。
+    「人名｜『写真集名』｜写真集｜レビュー」形式へ整形し、先頭約30字に人名＋作品名を固定する。
   漫画・同人（ebook/comic または doujin）は
-    検索流入向けに「作品名｜ジャンル｜作者orサークルorメーカー｜レビュー」とし、
+    検索流入向けに「作品名｜ジャンル｜作者orサークルorメーカー｜コミックor同人誌｜レビュー」とし、
     出版社を先頭に出さない。著者欄が空でもメーカーとジャンルは後ろに付ける。
     巻数は残し、【FANZA限定版】(単話)・モザイク版などは先頭に出さない。
   素人AV（videoc、または videoa で素人シグナルあり）は
-    「名前｜属性｜シリーズ｜レビュー」とし、名前だけのタイトルに潰さない。
+    「名前｜属性｜シリーズ｜レビュー」とし、種別語は付けない。
+  プロAV（videoa）は末尾に「AV」、小説は「小説」、実用書は「実用書」、アニメは「アニメ」。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
   account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
@@ -82,6 +83,16 @@ _CATCHY_MOBILE_HOOK_MAX = 36
 _CATCHY_CTA = "｜レビュー"
 _CATCHY_CTA_ALT = "｜チェック"
 _CATCHY_CTA_PHOTO_BONUS = "｜電子特典レビュー"
+# フロア種別は先頭に出さず、｜レビュー の直前に付ける。
+_FLOOR_TYPE_ALIASES: dict[str, tuple[str, ...]] = {
+    "コミック": ("コミック", "マンガ", "漫画"),
+    "同人誌": ("同人誌", "同人"),
+    "写真集": ("写真集",),
+    "小説": ("小説", "ラノベ"),
+    "実用書": ("実用書", "ビジネス書"),
+    "アニメ": ("アニメ",),
+    "AV": ("AV",),
+}
 _QUOTED_WORK_RE = re.compile(r"[『「]([^』」]{1,40})[』」]")
 _EDITION_BRACKET_RE = re.compile(r"【[^】]+】")
 _TANKAWA_RE = re.compile(r"[（(\[［]単話[）)\]］]")
@@ -199,7 +210,13 @@ def _fit_catchy_title(hook: str, core: str, tail: str) -> str:
         fitted = f"{hook}{short}{tail}"
         if len(fitted) <= _ATOMPUB_TITLE_MAX_CHARS:
             return fitted
-    alt_tail = _CATCHY_CTA_ALT
+    alt_tail = tail
+    if tail.endswith(_CATCHY_CTA):
+        alt_tail = tail[: -len(_CATCHY_CTA)] + _CATCHY_CTA_ALT
+    elif tail.endswith(_CATCHY_CTA_PHOTO_BONUS):
+        alt_tail = tail[: -len(_CATCHY_CTA_PHOTO_BONUS)] + _CATCHY_CTA_ALT
+    else:
+        alt_tail = _CATCHY_CTA_ALT
     max_core = _ATOMPUB_TITLE_MAX_CHARS - len(hook) - len(alt_tail)
     if max_core < 1:
         return _fit_atompub_title(f"{hook}{core}")
@@ -1086,6 +1103,31 @@ def _title_already_has_cta(title: str) -> bool:
     return "レビュー" in t or "チェック" in t
 
 
+def _type_label_in_text(label: str, text: str) -> bool:
+    if not label:
+        return False
+    aliases = _FLOOR_TYPE_ALIASES.get(label, (label,))
+    return any(a in (text or "") for a in aliases if a)
+
+
+def _catchy_cta_with_type(
+    *,
+    type_label: str = "",
+    already_in: str = "",
+    digital_bonus: bool = False,
+    include_cta: bool = True,
+) -> str:
+    """フロア種別を ｜レビュー の直前に付ける。作品名に同義語があるときは重ねない。"""
+    label = (type_label or "").strip()
+    type_part = ""
+    if label and not _type_label_in_text(label, already_in):
+        type_part = f"｜{label}"
+    cta = ""
+    if include_cta:
+        cta = _CATCHY_CTA_PHOTO_BONUS if digital_bonus else _CATCHY_CTA
+    return f"{type_part}{cta}"
+
+
 def _title_suggests_ebook_digital_bonus(title: str) -> bool:
     t = title
     return "電子版" in t and (
@@ -1137,14 +1179,22 @@ def _primary_credit_label(item: dict[str, Any]) -> tuple[str, list[str]]:
     return "", []
 
 
-def _build_mobile_catchy_title(core: str, names: list[str]) -> str:
+def _build_mobile_catchy_title(
+    core: str, names: list[str], *, type_label: str = ""
+) -> str:
     """出演者名を先頭に、フックを短くしてスマホ新着1行で目立つ形にする。"""
     lead = (names[0] if names else "").strip()
     body_src = _strip_trailing_credit(core, names) if lead else core
     hook = _title_hook_front(body_src)
     if not hook:
         hook = _title_hook_front(core) or core.strip()
-    cta = "" if _title_already_has_cta(hook) else _CATCHY_CTA
+    already = f"{lead}｜{hook}" if lead else hook
+    include_cta = not _title_already_has_cta(hook)
+    cta = _catchy_cta_with_type(
+        type_label=type_label,
+        already_in=already,
+        include_cta=include_cta,
+    )
 
     if lead:
         # すでに先頭が名前なら二重にしない
@@ -1223,16 +1273,23 @@ def _build_photo_mobile_catchy_title(
     """写真集向け: 先頭30字を「人名｜『写真集名』」に固定する。
 
     形式:
-      通常: {人名}｜『{写真集名}』｜レビュー
-      電子特典: {人名}｜『{写真集名}』｜電子特典レビュー
-        （長い【電子版…】接頭辞は可視枠を食うため付けない）
+      通常: {人名}｜『{写真集名}』｜写真集｜レビュー
+      電子特典: {人名}｜『{写真集名}』｜写真集｜電子特典レビュー
+        （長い【電子版…】接頭辞は可視枠を食うため付けない。
+         作品名に「写真集」があるときは種別語を重ねない）
     """
     lead = (names[0] if names else "").strip()
     work = _photobook_work_title(core, names)
     head = _fit_photo_name_work_lead(lead, work)
-    if _title_already_has_cta(head):
-        return _fit_atompub_title(head)
-    cta = _CATCHY_CTA_PHOTO_BONUS if digital_bonus else _CATCHY_CTA
+    include_cta = not _title_already_has_cta(head)
+    cta = _catchy_cta_with_type(
+        type_label="写真集",
+        already_in=head,
+        digital_bonus=digital_bonus,
+        include_cta=include_cta,
+    )
+    if not include_cta:
+        return _fit_atompub_title(head + cta)
     return _fit_catchy_title(head, "", cta)
 
 
@@ -1428,7 +1485,7 @@ def _build_comic_mobile_catchy_title(
     """漫画・同人向け: 作品名を先頭に固定する（検索・カテゴリ新着の両方）。
 
     形式:
-      通常: {作品名}｜{ジャンル}｜{作者orサークルorメーカー}｜レビュー
+      通常: {作品名}｜{ジャンル}｜{作者orサークルorメーカー}｜コミックor同人誌｜レビュー
       電子特典: 末尾を｜電子特典レビュー
     出版社・メーカーは先頭に出さず、著者なしのときの後ろクレジットに使う。
     """
@@ -1436,10 +1493,17 @@ def _build_comic_mobile_catchy_title(
     work = _comic_work_title(core, names)
     genre = _pick_comic_sell_genre(item, work)
     extras = [x for x in (genre, credit) if x]
-    if _title_already_has_cta(work):
-        return _fit_work_first_title(work, extras, "")
-    cta = _CATCHY_CTA_PHOTO_BONUS if digital_bonus else _CATCHY_CTA
-    return _fit_work_first_title(work, extras, cta)
+    type_label = _floor_type_label(item)
+    if not type_label:
+        type_label = "コミック"
+    include_cta = not _title_already_has_cta(work)
+    tail = _catchy_cta_with_type(
+        type_label=type_label,
+        already_in=work,
+        digital_bonus=digital_bonus,
+        include_cta=include_cta,
+    )
+    return _fit_work_first_title(work, extras, tail)
 
 
 def _is_amateur_av_item(item: dict[str, Any] | None) -> bool:
@@ -1462,6 +1526,31 @@ def _is_amateur_av_item(item: dict[str, Any] | None) -> bool:
         return False
     service = _item_str(item.get("service")).lower()
     return floor in ("videoa", "videoc") or service in ("digital", "")
+
+
+def _floor_type_label(item: dict[str, Any] | None) -> str:
+    """タイトル末尾（｜レビューの直前）に付けるフロア種別。videoc は空。"""
+    if not item:
+        return ""
+    if _is_doujin_item(item):
+        return "同人誌"
+    tone = _ebook_editorial_tone(item)
+    if tone == "comic":
+        return "コミック"
+    if tone == "photo":
+        return "写真集"
+    if tone == "novel":
+        return "小説"
+    if tone == "otherbooks":
+        return "実用書"
+    floor = _item_str(item.get("floor")).lower()
+    if floor == "anime" or "anime" in floor:
+        return "アニメ"
+    if _is_amateur_av_item(item):
+        return ""
+    if floor == "videoa":
+        return "AV"
+    return ""
 
 
 def _amateur_series_label(item: dict[str, Any], title: str) -> str:
@@ -1592,10 +1681,11 @@ def blog_post_title_for_item(
 ) -> str:
     """スマホのカテゴリ新着1行で目立つキャッチタイトルを生成する。
 
-    写真集（ebook/photo）は先頭約30字を「人名｜『写真集名』」に固定する。
-    漫画・同人は検索向けに「作品名｜ジャンル｜作者orサークルorメーカー｜レビュー」とし、
+    写真集（ebook/photo）は先頭約30字を「人名｜『写真集名』」に固定し、末尾に写真集を付ける。
+    漫画・同人は検索向けに「作品名｜ジャンル｜作者orサークルorメーカー｜コミックor同人誌｜レビュー」。
     出版社は先頭に出さない。著者なしでもメーカーとジャンルは後ろに付ける。
-    素人AVは「名前｜属性｜シリーズ」に固定する。
+    素人AVは「名前｜属性｜シリーズ」に固定し、種別語は付けない。
+    プロAVは末尾に AV、小説は小説、実用書は実用書、アニメはアニメ。
     LIVEDOOR_CATCHY_TITLE=0 でオフ（元タイトルのまま）。
     """
     raw = os.environ.get("LIVEDOOR_CATCHY_TITLE", "1").strip().lower()
@@ -1636,11 +1726,18 @@ def blog_post_title_for_item(
         body_src = _strip_trailing_credit(core, names) if names else core
         hook = _title_hook_front(body_src, max_len=28)
         lead = (names[0] if names else "").strip()
+        type_label = _floor_type_label(item)
+        already = f"{prefix}{lead}｜{hook}" if lead else f"{prefix}{hook}"
+        cta = _catchy_cta_with_type(
+            type_label=type_label, already_in=already
+        )
         if lead and not hook.startswith(lead):
-            return _fit_catchy_title(f"{prefix}{lead}｜", hook, _CATCHY_CTA)
-        return _fit_catchy_title(prefix, hook, _CATCHY_CTA)
+            return _fit_catchy_title(f"{prefix}{lead}｜", hook, cta)
+        return _fit_catchy_title(prefix, hook, cta)
 
-    return _build_mobile_catchy_title(core, names)
+    return _build_mobile_catchy_title(
+        core, names, type_label=_floor_type_label(item)
+    )
 
 
 def _trim_for_reader(
