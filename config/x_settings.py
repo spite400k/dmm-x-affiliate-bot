@@ -4,7 +4,7 @@ main_x.py / main_x-buzz-affiliate.py / main_weekly_ranking.py が参照する。
 """
 
 # schedule スロットでのランダム skip 率（環境変数 POST_SKIP_RATE で上書き可）
-DEFAULT_POST_SKIP_RATE = 0.4
+DEFAULT_POST_SKIP_RATE = 0.0
 
 # 回復期の投稿モード割合（合計 1.0）
 POST_MODE_WEIGHTS = {

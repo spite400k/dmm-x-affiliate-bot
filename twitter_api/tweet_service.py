@@ -7,6 +7,11 @@ import time
 import random
 import requests
 from twitter_api.safe_post import safe_post_tweet
+from twitter_api.text_limits import (
+    TWEET_MAX_WEIGHTED,
+    clip_text_weighted,
+    twitter_weighted_length,
+)
 from twitter_api.twitter_client import get_clients
 from datetime import datetime, timezone
 from config.x_settings import REPLY_WAIT_SECONDS_RANGE
@@ -160,6 +165,20 @@ def pick_reply_text(portal: str, *, rng: random.Random | None = None) -> str:
     return r.choice(_REPLY_TEXTS).format(portal=portal)
 
 
+def _fit_body_to_tweet_limit(body: str, suffixes: list[str]) -> str:
+    """CTA・URL・ハッシュタグを残し、本文を加重280以内に収める。"""
+    if not body:
+        return ""
+    suffix_text = "\n\n".join(suffixes)
+    if not suffix_text:
+        return clip_text_weighted(body, TWEET_MAX_WEIGHTED)
+    reserved = twitter_weighted_length(suffix_text) + twitter_weighted_length("\n\n")
+    budget = TWEET_MAX_WEIGHTED - reserved
+    if budget <= 0:
+        return ""
+    return clip_text_weighted(body, budget)
+
+
 def assemble_parent_post_text(
     body: str,
     hashtag_block: str,
@@ -168,14 +187,18 @@ def assemble_parent_post_text(
     portal: str = "",
     link_placement: str = "reply",
 ) -> str:
-    """親ツイート本文を組み立てる（純粋関数・テスト用）。"""
-    parts = [body.strip()] if body and body.strip() else []
-    if hashtag_block:
-        parts.append(hashtag_block)
-    if cta:
-        parts.append(cta)
-    if link_placement == "parent" and portal:
-        parts.append(portal)
+    """親ツイート本文を組み立てる（純粋関数・テスト用）。加重280以内。"""
+    suffixes: list[str] = []
+    if hashtag_block and hashtag_block.strip():
+        suffixes.append(hashtag_block.strip())
+    if cta and cta.strip():
+        suffixes.append(cta.strip())
+    if link_placement == "parent" and portal and str(portal).strip():
+        suffixes.append(str(portal).strip())
+
+    fitted_body = _fit_body_to_tweet_limit((body or "").strip(), suffixes)
+    parts = [fitted_body] if fitted_body else []
+    parts.extend(suffixes)
     return "\n\n".join(parts).strip()
 
 
@@ -361,7 +384,12 @@ def post_full_twitter(
             except Exception as e:
                 logger.error(f"⚠ カバー画像アップロード失敗: {e}")
 
-        logger.info(f"🚨 ポスト: {post_text}")
+        logger.info(
+            "🚨 ポスト (加重=%s/%s): %s",
+            twitter_weighted_length(post_text),
+            TWEET_MAX_WEIGHTED,
+            post_text,
+        )
         tweet_id = safe_post_tweet(client_v2, post_text, media_ids)
         if tweet_id:
             tweet_id = int(tweet_id)
