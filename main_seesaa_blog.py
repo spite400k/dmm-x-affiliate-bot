@@ -10,6 +10,7 @@ dmm_ai_review_summaries.review_digest がある作品のみ本文に取り込み
   2) Supabase mst_blog_accounts（platform=seesaa, enabled=true, account_id=--account）
   3) 各行の site / service / floor に応じて未投稿キューを取得し Seesaa へ XML-RPC 投稿
      本文は livedoor / FC2 と同様 ①review_digest → ②パッケージ画像 → ③サンプル画像 → ④ポータルリンク
+     FANZA / アダルト floor は利用規約のため投稿しない（DMM.com の ebook 等のみ）
 
 mst_blog_accounts（platform=seesaa）:
   blog_id … metaWeblog の blogid（ホスト名。例: gravure.seesaa.blog。https:// 付き URL も可）
@@ -26,7 +27,7 @@ mst_blog_accounts（platform=seesaa）:
 
 使用例:
   python main_seesaa_blog.py --service ebook --floor comic
-  python main_seesaa_blog.py --account 2 --service digital --floor videoa --draft
+  python main_seesaa_blog.py --account 1 --service ebook --floor comic --draft
   python main_seesaa_blog.py --account 1 --all-targets
   python main_seesaa_blog.py --manual "テスト" --body "<p>HTML</p>"
   python main_seesaa_blog.py --account 1 --list-blogs
@@ -67,7 +68,12 @@ from livedoor_blog.post import (
     build_livedoor_blog_html,
 )
 from twitter_api.tweet_service import format_campaigns
-from utils.blog_targets import normalize_portal_site, resolve_post_targets
+from utils.blog_targets import (
+    is_adult_blog_target,
+    is_adult_item_row,
+    normalize_portal_site,
+    resolve_post_targets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +92,8 @@ def list_seesaa_blogs(
     """blogger.getUsersBlogs でアカウント配下のブログ一覧を返す。"""
 
     def _call(proxy: xmlrpc.client.ServerProxy) -> Any:
-        return proxy.blogger.getUsersBlogs(username, password)
+        # Blogger API: appkey, username, password（appkey は Seesaa では未使用）
+        return proxy.blogger.getUsersBlogs("", username, password)
 
     blogs = seesaa_xmlrpc_call(xmlrpc_url, _call)
     if isinstance(blogs, list):
@@ -294,6 +301,19 @@ def _exclude_item_after_post_failure(
         )
 
 
+def _skip_adult_target(site: str, service: str, floor: str) -> bool:
+    """Seesaa はアダルト（FANZA）投稿不可。対象なら True。"""
+    if not is_adult_blog_target(site, service, floor):
+        return False
+    logger.warning(
+        "アダルト対象のため Seesaa 投稿をスキップ: site=%s service=%s floor=%s",
+        site,
+        service,
+        floor,
+    )
+    return True
+
+
 def run_seesaa_one_item(
     account_id: str,
     service: str,
@@ -306,11 +326,37 @@ def run_seesaa_one_item(
     publish: bool,
 ) -> bool:
     """Supabase から1件取り Seesaa へ XML-RPC 投稿する。"""
+    if _skip_adult_target(site, service, floor):
+        return False
+
     blog_key = seesaa_cfg["blog_key"]
-    post = get_next_livedoor_post(service, floor, account_id, blog_key)
-    if not post:
-        logger.info(
-            "投稿対象なし（未投稿かつ review_digest あり）: account=%s service=%s floor=%s",
+    post: dict[str, Any] | None = None
+    for _ in range(10):
+        post = get_next_livedoor_post(service, floor, account_id, blog_key)
+        if not post:
+            logger.info(
+                "投稿対象なし（未投稿かつ review_digest あり）: account=%s service=%s floor=%s",
+                account_id,
+                service,
+                floor,
+            )
+            return False
+        if not is_adult_item_row(post):
+            break
+        logger.warning(
+            "アダルト作品のため Seesaa 投稿をスキップ: content_id=%s item_id=%s site=%s",
+            post.get("content_id"),
+            post.get("id"),
+            post.get("site"),
+        )
+        if dry or no_mark_posted:
+            return False
+        _exclude_item_after_post_failure(
+            str(post["id"]), account_id, blog_key, account_id
+        )
+    else:
+        logger.warning(
+            "アダルト作品のスキップが上限に達した: account=%s service=%s floor=%s",
             account_id,
             service,
             floor,
@@ -664,22 +710,28 @@ def main() -> None:
         master_jobs = _seesaa_rows_with_service_floor(seesaa_rows)
         if master_jobs:
             any_done = False
+            attempted = 0
             for seesaa_cfg in master_jobs:
                 site = normalize_portal_site(
                     seesaa_cfg.get("site"),
                     fallback=fallback_site_norm,
                 )
+                service = str(seesaa_cfg.get("service") or "").strip()
+                floor = str(seesaa_cfg.get("floor") or "").strip()
+                if _skip_adult_target(site, service, floor):
+                    continue
+                attempted += 1
                 logger.info(
                     "ターゲット試行（mst_blog_accounts）: blog_id=%s service=%s floor=%s site=%s",
                     seesaa_cfg.get("blog_id"),
-                    seesaa_cfg.get("service"),
-                    seesaa_cfg.get("floor"),
+                    service,
+                    floor,
                     site,
                 )
                 if run_seesaa_one_item(
                     args.account,
-                    str(seesaa_cfg["service"]).strip(),
-                    str(seesaa_cfg["floor"]).strip(),
+                    service,
+                    floor,
                     site,
                     seesaa_cfg,
                     dry=dry,
@@ -687,9 +739,14 @@ def main() -> None:
                     publish=publish,
                 ):
                     any_done = True
-            if not any_done:
-                logger.info("全ターゲットで投稿対象なし。正常終了します。")
-            return
+            if attempted:
+                if not any_done:
+                    logger.info("全ターゲットで投稿対象なし。正常終了します。")
+                return
+            logger.warning(
+                "mst_blog_accounts の seesaa 行はアダルトのみのため、"
+                " BLOG_ACCOUNT_SETTINGS の非アダルト targets にフォールバックします"
+            )
 
         seesaa_cfg = seesaa_rows[0]
         targets_list = resolve_post_targets(acc_cfg, seesaa_cfg)
@@ -703,6 +760,8 @@ def main() -> None:
             sys.exit(2)
         any_done = False
         for t in targets_list:
+            if _skip_adult_target(t["site"], t["service"], t["floor"]):
+                continue
             logger.info(
                 "ターゲット試行（config targets）: service=%s floor=%s site=%s",
                 t["service"],
@@ -749,6 +808,14 @@ def main() -> None:
         seesaa_cfg.get("site"),
         fallback=fallback_site_norm,
     )
+    if is_adult_blog_target(site, args.service, args.floor):
+        logger.error(
+            "Seesaa はアダルト投稿不可のため終了します: site=%s service=%s floor=%s",
+            site,
+            args.service,
+            args.floor,
+        )
+        sys.exit(2)
     ok = run_seesaa_one_item(
         args.account,
         args.service,
