@@ -20,6 +20,7 @@ from livedoor_blog.post import (
     _strip_trailing_credit,
     _title_hook_front,
     blog_post_title_for_item,
+    build_livedoor_blog_html,
 )
 
 
@@ -156,7 +157,7 @@ def test_ebook_photo_bonus_keeps_name_work_in_front() -> None:
 
 
 def test_ebook_comic_bonus_keeps_author_work_in_front() -> None:
-    """漫画の電子特典でも【電子版…】を先頭に付けず、作者｜作品名を可視枠に残す。"""
+    """漫画の電子特典でも【電子版…】を先頭に付けず、作品名を可視枠に残す。"""
     title = "【電子版限定特典付き】なにかのコミックタイトルがとても長い場合の例です 誰か"
     item = {
         "service": "ebook",
@@ -164,12 +165,13 @@ def test_ebook_comic_bonus_keeps_author_work_in_front() -> None:
         "author": [{"name": "誰か"}],
     }
     got = blog_post_title_for_item(title, item)
-    assert got.startswith("誰か｜『")
+    assert got.startswith("なにかのコミックタイトル")
     assert "電子特典レビュー" in got
     assert "【電子版描き下ろし】" not in got
     assert len(got) <= _ATOMPUB_TITLE_MAX_CHARS
     visible = got[:_CATCHY_MOBILE_VISIBLE]
-    assert "誰か" in visible
+    assert "なにかのコミック" in visible
+    assert not visible.startswith("誰か")
 
 
 def test_strip_edition_noise_drops_fanza_and_tankawa() -> None:
@@ -188,16 +190,24 @@ def test_comic_work_title_uses_first_clause() -> None:
     assert _comic_work_title(core, []) == "メイド教育"
 
 
+def test_comic_work_title_keeps_volume_after_bang() -> None:
+    core = "勇者に全部奪われた俺は勇者の母親とパーティを組みました！ 7"
+    assert _comic_work_title(core, []) == (
+        "勇者に全部奪われた俺は勇者の母親とパーティを組みました！ 7"
+    )
+
+
 def test_build_comic_mobile_catchy_title() -> None:
     got = _build_comic_mobile_catchy_title(
         "秘め妻【デジタル特装版】【FANZA限定版】",
         ["某作者"],
     )
-    assert got.startswith("某作者｜『秘め妻』")
+    assert got.startswith("秘め妻")
+    assert "某作者" in got
     assert got.endswith("｜レビュー")
     visible = got[:_CATCHY_MOBILE_VISIBLE]
-    assert "某作者" in visible
     assert "秘め妻" in visible
+    assert not visible.startswith("某作者")
     assert "FANZA" not in visible
     assert "デジタル特装" not in visible
 
@@ -210,12 +220,48 @@ def test_blog_post_title_comic_uses_author_and_work() -> None:
         "author": [{"name": "山田太郎"}],
     }
     got = blog_post_title_for_item(title, item)
-    assert got.startswith("山田太郎｜『")
+    assert got.startswith("残クレアルフォード元ヤン人妻")
+    assert "山田太郎" in got
     assert got.endswith("｜レビュー")
     visible = got[:_CATCHY_MOBILE_VISIBLE]
-    assert "山田太郎" in visible
+    assert "残クレアルフォード" in visible
     assert "FANZA" not in got
     assert "【デジタル" not in got
+
+
+def test_blog_post_title_comic_leads_with_work_not_publisher() -> None:
+    """検索流入は作品名。出版社を先頭に出すと Google / カテゴリ新着の両方で負ける。"""
+    title = "ゾンビのあふれた世界で俺だけが襲われない 4"
+    item = {
+        "service": "ebook",
+        "floor": "comic",
+        "title": title,
+        "maker": "フロンティアワークス",
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("ゾンビのあふれた世界で俺だけが襲われない")
+    assert "4" in got
+    assert "フロンティアワークス" not in got
+    assert "…" not in got
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert visible.startswith("ゾンビのあふれた")
+    assert not visible.startswith("フロンティア")
+
+
+def test_blog_post_title_comic_keeps_search_query_volume() -> None:
+    title = "勇者に全部奪われた俺は勇者の母親とパーティを組みました！ 7"
+    item = {
+        "service": "ebook",
+        "floor": "comic",
+        "title": title,
+        "author": [{"name": "ある作者"}],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("勇者に全部奪われた俺は勇者の母親とパーティを組みました")
+    assert "7" in got
+    assert "ある作者" in got
+    assert got.endswith("｜レビュー")
+    assert len(got) <= _ATOMPUB_TITLE_MAX_CHARS
 
 
 def test_blog_post_title_doujin_uses_circle_maker() -> None:
@@ -226,11 +272,13 @@ def test_blog_post_title_doujin_uses_circle_maker() -> None:
         "maker": "某サークル",
     }
     got = blog_post_title_for_item(title, item)
-    assert got.startswith("某サークル｜『VIP限定 SEXバーへようこそ』")
+    assert got.startswith("VIP限定 SEXバーへようこそ")
+    assert "某サークル" in got
     assert got.endswith("｜レビュー")
     assert "モザイク版" not in got
     visible = got[:_CATCHY_MOBILE_VISIBLE]
-    assert "某サークル" in visible
+    assert "VIP限定" in visible
+    assert not visible.startswith("某サークル")
 
 
 def test_blog_post_title_doujin_prefers_author_over_maker() -> None:
@@ -242,7 +290,8 @@ def test_blog_post_title_doujin_prefers_author_over_maker() -> None:
         "maker": "サークルB",
     }
     got = blog_post_title_for_item(title, item)
-    assert got.startswith("著者A｜『生殖のため生まれた猿ども』")
+    assert got.startswith("生殖のため生まれた猿ども")
+    assert "著者A" in got
     assert "サークルB" not in got
     assert "単話" not in got
 
@@ -260,7 +309,7 @@ def test_fit_pipe_lead_truncates_long_series() -> None:
     assert len(got) <= _CATCHY_MOBILE_VISIBLE
 
 
-def test_build_amateur_av_catchy_uses_series_and_attr() -> None:
+def test_build_amateur_av_catchy_uses_name_attr_series() -> None:
     item = {
         "service": "digital",
         "floor": "videoc",
@@ -269,12 +318,26 @@ def test_build_amateur_av_catchy_uses_series_and_attr() -> None:
         "actress": [{"name": "みなみ"}],
     }
     got = _build_amateur_av_catchy_title("みなみ", item, ["みなみ"])
-    assert got.startswith("シロウトTV｜人妻｜みなみ")
+    assert got.startswith("みなみ｜人妻｜素人｜シロウトTV")
     assert got.endswith("｜レビュー")
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert "シロウトTV" in visible
     assert "みなみ" in visible
     assert got != "みなみ｜レビュー"
+
+
+def test_build_amateur_av_catchy_prefers_title_over_actress() -> None:
+    item = {
+        "service": "digital",
+        "floor": "videoc",
+        "maker": "ゆず故障",
+        "genres": ["素人"],
+        "actress": [{"name": "別名"}],
+    }
+    got = _build_amateur_av_catchy_title("RGちゃん（仮名）", item, ["別名"])
+    assert got.startswith("RGちゃん（仮名）｜")
+    assert "別名" not in got
+    assert got.endswith("｜レビュー")
 
 
 def test_blog_post_title_videoc_avoids_name_only() -> None:
@@ -301,7 +364,7 @@ def test_blog_post_title_videoc_mirei_with_hatsudori() -> None:
         "genres": ["初撮り", "素人"],
     }
     got = blog_post_title_for_item(title, item)
-    assert got.startswith("初撮り｜MIREI")
+    assert got.startswith("MIREI｜初撮り")
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert "初撮り" in visible
     assert "MIREI" in visible
@@ -316,10 +379,10 @@ def test_blog_post_title_videoc_two_names() -> None:
         "actress": [{"name": "ゆみ"}, {"name": "ひなこ"}],
     }
     got = blog_post_title_for_item(title, item)
-    assert got.startswith("ラグジュTV｜")
+    assert got.startswith("ゆみ＆ひなこ｜")
     assert "ゆみ＆ひなこ" in got
     visible = got[:_CATCHY_MOBILE_VISIBLE]
-    assert "ラグジュTV" in visible
+    assert "ラグジュTV" in got
 
 
 def test_blog_post_title_videoa_amateur_signal() -> None:
@@ -336,6 +399,47 @@ def test_blog_post_title_videoa_amateur_signal() -> None:
     assert "ナンパ" in visible or "素人" in visible
 
 
+def test_blog_post_title_videoc_uses_auto_comment_attr() -> None:
+    title = "RGちゃん（仮名）"
+    item = {
+        "service": "digital",
+        "floor": "videoc",
+        "title": title,
+        "maker": "ゆず故障",
+        "auto_comment": "雰囲気重視で楽しむ映像。余韻を味わいたい人向け。",
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("RGちゃん（仮名）｜雰囲気重視で楽しむ映像")
+    assert got.endswith("｜レビュー")
+
+
+def test_blog_post_title_videoc_adds_sell_genre_from_genres() -> None:
+    title = "RGちゃん（仮名）"
+    item = {
+        "service": "digital",
+        "floor": "videoc",
+        "title": title,
+        "maker": "ゆず故障",
+        "genres": [
+            "AI生成作品",
+            "ハイビジョン",
+            "中出し",
+            "電マ",
+            "局部アップ",
+            "制服",
+            "学生服",
+            "美乳",
+            "美少女",
+            "貧乳・微乳",
+            "女子校生",
+        ],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got.startswith("RGちゃん（仮名）｜")
+    assert "｜中出し｜" in got
+    assert got.endswith("｜レビュー")
+
+
 def test_blog_post_title_videoa_pro_keeps_actress_hook() -> None:
     title = "高身長の貧困女学生は小さいおじさん達に群がられ貪られ春を売る。 明日葉みつは"
     item = {
@@ -346,3 +450,27 @@ def test_blog_post_title_videoa_pro_keeps_actress_hook() -> None:
     got = blog_post_title_for_item(title, item)
     assert got.startswith("明日葉みつは｜高身長")
     assert "｜レビュー" in got
+
+
+def test_comic_html_lead_contains_full_work_title() -> None:
+    """本文先頭に正式タイトルを置き、検索エンジンが作品名を拾えるようにする。"""
+    title = "ゾンビのあふれた世界で俺だけが襲われない 4"
+    html = build_livedoor_blog_html(
+        title="フロンティアワークス｜『ゾンビのあふれた世界で俺だけが襲…』｜レビュー",
+        twitter_text="レビュー本文",
+        affiliate_url="https://example.com/item",
+        portal_url="https://dmmportal.jp/ebook/comic/cid",
+        article_style="simple",
+        item_row={
+            "title": title,
+            "service": "ebook",
+            "floor": "comic",
+            "maker": "フロンティアワークス",
+            "author": [{"name": "裏地ろくろ"}],
+        },
+        ai_review_row={"review_digest": "本作は原作小説の続編です。"},
+    )
+    assert 'class="ld-work-lead"' in html
+    assert "<strong>ゾンビのあふれた世界で俺だけが襲われない 4</strong>" in html
+    assert "裏地ろくろ" in html
+    assert html.index("ld-work-lead") < html.index("本作は原作小説")

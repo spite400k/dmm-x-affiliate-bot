@@ -32,9 +32,10 @@ Playwright:
   写真集（ebook floor=photo）のタイトルはカテゴリ新着向けに
     「人名｜『写真集名』｜レビュー」形式へ整形し、先頭約30字に人名＋作品名を固定する。
   漫画・同人（ebook/comic または doujin）は
-    「作者orサークル｜『作品名』｜レビュー」とし、【FANZA限定版】(単話)・モザイク版などは先頭に出さない。
+    検索流入向けに「作品名｜作者orサークル｜レビュー」とし、出版社を先頭に出さない。
+    巻数は残し、【FANZA限定版】(単話)・モザイク版などは先頭に出さない。
   素人AV（videoc、または videoa で素人シグナルあり）は
-    「シリーズor属性｜名前｜レビュー」とし、名前だけのタイトルに潰さない。
+    「名前｜属性｜シリーズ｜レビュー」とし、名前だけのタイトルに潰さない。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
   account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
@@ -73,7 +74,7 @@ def _fit_atompub_title(title: str) -> str:
 
 # スマホのカテゴリ新着は先頭〜30字前後しか見えない想定。
 # 写真集（photo）は「人名｜写真集名」、漫画・同人は「作者orサークル｜作品名」、
-# 素人AVは「シリーズor属性｜名前」をこの可視枠に固定する。
+# 素人AVは「名前｜属性｜シリーズ」をこの可視枠に固定する。
 # それ以外は名前＋フックを前に寄せる。
 _CATCHY_MOBILE_VISIBLE = 30
 _CATCHY_MOBILE_HOOK_MAX = 36
@@ -84,9 +85,59 @@ _QUOTED_WORK_RE = re.compile(r"[『「]([^』」]{1,40})[』」]")
 _EDITION_BRACKET_RE = re.compile(r"【[^】]+】")
 _TANKAWA_RE = re.compile(r"[（(\[［]単話[）)\]］]")
 _MOSAIC_EDITION_RE = re.compile(r"モザイク版")
+# 末尾の巻数（ 7 / （18） / 第8巻）。検索クエリと一致させるため作品名から落とさない。
+_VOLUME_SUFFIX_RE = re.compile(
+    r"(?:"
+    r"\s*第\s*\d+\s*巻"
+    r"|\s*[（(]\s*\d+\s*[)）]"
+    r"|\s+\d+"
+    r")\s*$"
+)
+_COMIC_PUBLISHER_NAMES = frozenset(
+    {
+        "小学館",
+        "講談社",
+        "集英社",
+        "秋田書店",
+        "白泉社",
+        "芳文社",
+        "双葉社",
+        "少年画報社",
+        "スクウェア・エニックス",
+        "スクウェアエニックス",
+        "KADOKAWA",
+        "角川書店",
+        "角川",
+        "メディアファクトリー",
+        "一迅社",
+        "新潮社",
+        "徳間書店",
+        "マッグガーデン",
+        "オーバーラップ",
+        "ホビージャパン",
+        "主婦の友社",
+        "実業之日本社",
+        "日本文芸社",
+        "竹書房",
+        "リイド社",
+        "宙出版",
+        "フロンティアワークス",
+        "フレックスコミックス",
+        "ヒーローズ",
+        "コアミックス",
+        "星海社",
+        "笠倉出版社",
+        "大洋図書",
+        "茜新社",
+        "富士美出版",
+        "ヒット出版社",
+    }
+)
+_COMIC_PUBLISHER_SUFFIXES = ("出版社", "書店", "書房", "文庫", "編集部", "コミックス")
 _AMATEUR_SIGNAL_RE = re.compile(r"素人|シロウト|しろうと|amateur", re.IGNORECASE)
 _AMATEUR_SERIES_KEYS = ("シロウトTV", "ラグジュTV", "ナンパTV")
 _AMATEUR_ATTR_PRIORITY = (
+    "雰囲気重視で楽しむ映像",
     "初撮り",
     "人妻",
     "熟女",
@@ -96,6 +147,17 @@ _AMATEUR_ATTR_PRIORITY = (
     "女子大生",
     "地方",
     "素人",
+)
+_AMATEUR_GENRE_SELL_PRIORITY = (
+    "中出し",
+    "電マ",
+    "局部アップ",
+    "制服",
+    "学生服",
+    "女子校生",
+    "美少女",
+    "美乳",
+    "貧乳・微乳",
 )
 
 
@@ -1147,30 +1209,53 @@ def _build_photo_mobile_catchy_title(
     return _fit_catchy_title(head, "", cta)
 
 
-def _is_comic_or_doujin_item(item: dict[str, Any] | None) -> bool:
-    """ebook/comic または doujin フロアなら True。"""
+def _is_doujin_item(item: dict[str, Any] | None) -> bool:
     if not item:
         return False
     service = _item_str(item.get("service")).lower()
     floor = _item_str(item.get("floor")).lower()
-    if service == "doujin" or "doujin" in floor:
+    return service == "doujin" or "doujin" in floor
+
+
+def _is_comic_or_doujin_item(item: dict[str, Any] | None) -> bool:
+    """ebook/comic または doujin フロアなら True。"""
+    if not item:
+        return False
+    if _is_doujin_item(item):
         return True
     return _ebook_editorial_tone(item) == "comic"
 
 
+def _looks_like_publisher(name: str) -> bool:
+    """小学館・フロンティアワークスなど、検索されにくい出版社名。"""
+    n = (name or "").strip()
+    if not n:
+        return False
+    if n in _COMIC_PUBLISHER_NAMES:
+        return True
+    if "フロンティアワークス" in n or "スクウェア・エニックス" in n:
+        return True
+    return any(n.endswith(suf) for suf in _COMIC_PUBLISHER_SUFFIXES)
+
+
 def _comic_doujin_credit_names(item: dict[str, Any] | None) -> list[str]:
-    """漫画は著者、同人はサークル（maker / circle）を先頭クレジットにする。"""
+    """漫画は著者のみ（出版社は使わない）。同人はサークル / maker。"""
     if not item:
         return []
-    authors = _parse_credit_names(item.get("author"))
+    authors = [
+        a
+        for a in _parse_credit_names(item.get("author"))
+        if a and not _looks_like_publisher(a)
+    ]
     if authors:
         return authors
-    circles = _parse_credit_names(item.get("circle"))
-    if circles:
-        return circles
-    maker = _item_str(item.get("maker"))
-    if maker:
-        return [maker]
+    if _is_doujin_item(item):
+        circles = _parse_credit_names(item.get("circle"))
+        if circles:
+            return circles
+        maker = _item_str(item.get("maker"))
+        if maker:
+            return [maker]
     return []
 
 
@@ -1183,16 +1268,31 @@ def _strip_edition_noise(text: str) -> str:
     return s.strip(" 　/-－・|｜")
 
 
+def _peel_volume_suffix(text: str) -> tuple[str, str]:
+    """('本体', '（18）' / ' 7' / '')。本体が短すぎるときは剥がさない。"""
+    s = (text or "").rstrip()
+    m = _VOLUME_SUFFIX_RE.search(s)
+    if not m:
+        return s, ""
+    core = s[: m.start()].rstrip()
+    if len(core) < 2:
+        return s, ""
+    return core, m.group(0)
+
+
 def _comic_work_title(core: str, names: list[str]) -> str:
-    """漫画・同人の作品名。販促タグを除き、『』または短い芯を使う。"""
+    """漫画・同人の作品名。販促タグを除き、巻数は末尾に残す。"""
     body = _strip_okuri_brackets(core) or (core or "").strip()
     body = _strip_edition_noise(body)
     if names:
         body = _strip_trailing_credit(body, names)
         body = _strip_edition_noise(body)
+    body, volume = _peel_volume_suffix(body)
+
     quoted = _extract_quoted_work_title(body)
     if quoted:
-        return _strip_edition_noise(quoted) or quoted
+        work = _strip_edition_noise(quoted) or quoted
+        return f"{work}{volume}".strip()
 
     s = body.strip()
     for n in names:
@@ -1201,15 +1301,62 @@ def _comic_work_title(core: str, names: list[str]) -> str:
             s = s[len(n) :].lstrip(" 　|｜:：/-－・")
             break
 
-    for sep in ("。", "！", "!", "？", "?"):
-        if sep in s:
-            first = s.split(sep, 1)[0].strip()
-            if len(first) >= 2:
-                s = first
-                break
+    # 「メイド教育。ー没落貴族」のような補足は切る。
+    # 異世界タイトル末尾の「！」は作品名の一部なので残す。
+    if "。" in s:
+        first = s.split("。", 1)[0].strip()
+        if len(first) >= 2:
+            s = first
 
     s = s.strip(" 　『』「」【】")
-    return s or body.strip() or (core or "").strip()
+    work = s or body.strip() or (core or "").strip()
+    if volume and not work.endswith(volume.strip()):
+        return f"{work}{volume}".strip()
+    return work
+
+
+def _fit_work_first_title(work: str, author: str, tail: str) -> str:
+    """作品名を先頭に置き、AtomPub 上限内に収める。巻数はできるだけ残す。"""
+    w = (work or "").strip() or "作品"
+    author = (author or "").strip()
+    if author and w.startswith(author):
+        author = ""
+    mid = f"｜{author}" if author else ""
+    candidate = f"{w}{mid}{tail}"
+    if len(candidate) <= _ATOMPUB_TITLE_MAX_CHARS:
+        return candidate
+    candidate = f"{w}{tail}"
+    if len(candidate) <= _ATOMPUB_TITLE_MAX_CHARS:
+        return candidate
+    core, volume = _peel_volume_suffix(w)
+    budget = _ATOMPUB_TITLE_MAX_CHARS - len(volume) - len(tail)
+    if budget < 2:
+        return _fit_atompub_title(f"{w}{tail}")
+    short = core if len(core) <= budget else core[: budget - 1] + "…"
+    return f"{short}{volume}{tail}"
+
+
+def _comic_seo_lead_html(item: dict[str, Any] | None) -> str:
+    """検索エンジン向けに、本文先頭へ正式な作品名（巻数つき）を置く。"""
+    if not item or not _is_comic_or_doujin_item(item):
+        return ""
+    raw = _item_str(item.get("title"))
+    names = _comic_doujin_credit_names(item)
+    work = _comic_work_title(raw, names)
+    if not work:
+        return ""
+    esc = html_module.escape
+    credit = ""
+    if names:
+        credit = f"（{esc(names[0])}）"
+    else:
+        maker = _item_str(item.get("maker"))
+        if maker:
+            credit = f"（{esc(maker)}）"
+    return (
+        '<p class="ld-work-lead" style="margin:0 0 0.85rem;line-height:1.7;">'
+        f"<strong>{esc(work)}</strong>{credit}</p>"
+    )
 
 
 def _build_comic_mobile_catchy_title(
@@ -1218,19 +1365,21 @@ def _build_comic_mobile_catchy_title(
     *,
     digital_bonus: bool = False,
 ) -> str:
-    """漫画・同人向け: 先頭30字を「作者orサークル｜『作品名』」に固定する。
+    """漫画・同人向け: 作品名を先頭に固定する（検索・カテゴリ新着の両方）。
 
     形式:
-      通常: {作者}｜『{作品名}』｜レビュー
-      電子特典: {作者}｜『{作品名}』｜電子特典レビュー
+      通常: {作品名}｜{作者orサークル}｜レビュー
+      電子特典: {作品名}｜{作者orサークル}｜電子特典レビュー
+    出版社名は names に含めない。巻数は作品名側に残す。
     """
     lead = (names[0] if names else "").strip()
+    if lead and _looks_like_publisher(lead):
+        lead = ""
     work = _comic_work_title(core, names)
-    head = _fit_name_work_lead(lead, work, fallback="作品")
-    if _title_already_has_cta(head):
-        return _fit_atompub_title(head)
+    if _title_already_has_cta(work):
+        return _fit_work_first_title(work, lead, "")
     cta = _CATCHY_CTA_PHOTO_BONUS if digital_bonus else _CATCHY_CTA
-    return _fit_catchy_title(head, "", cta)
+    return _fit_work_first_title(work, lead, cta)
 
 
 def _is_amateur_av_item(item: dict[str, Any] | None) -> bool:
@@ -1289,6 +1438,33 @@ def _format_amateur_name_label(names: list[str]) -> str:
     return f"{cleaned[0]}＆{cleaned[1]}"
 
 
+def _amateur_name_from_title(core: str, names: list[str]) -> str:
+    """素人AVタイトルの名前は title を優先し、空ならクレジット名を使う。"""
+    t = _strip_okuri_brackets(core or "").strip()
+    if t:
+        return t
+    return _format_amateur_name_label(names)
+
+
+def _pick_amateur_sell_genre(item: dict[str, Any], *, attr: str = "") -> str:
+    """genres からタイトル訴求に使う語を1つ選ぶ。"""
+    gs = _normalize_genres(item.get("genres"))
+    if not gs:
+        return ""
+    for key in _AMATEUR_GENRE_SELL_PRIORITY:
+        if key == attr:
+            continue
+        if key in gs:
+            return key
+    for g in gs:
+        if g in ("AI生成作品", "ハイビジョン"):
+            continue
+        if g == attr:
+            continue
+        return g
+    return ""
+
+
 def _fit_pipe_lead(
     parts: list[str], *, max_len: int = _CATCHY_MOBILE_VISIBLE
 ) -> str:
@@ -1325,9 +1501,9 @@ def _build_amateur_av_catchy_title(
     item: dict[str, Any],
     names: list[str],
 ) -> str:
-    """素人AV向け: 先頭30字を「シリーズor属性｜名前」に固定する。
+    """素人AV向け: 先頭30字を「名前｜属性｜シリーズ」に固定する。
 
-    形式: {シリーズ}｜{属性}｜{名前}｜レビュー
+    形式: {名前}｜{属性}｜{シリーズ}｜レビュー
     名前だけの「みな｜レビュー」にはしない。
     """
     series = _amateur_series_label(item, core)
@@ -1336,12 +1512,14 @@ def _build_amateur_av_catchy_title(
             core,
             series,
             _item_str(item.get("maker")),
+            _item_str(item.get("auto_comment")),
             " ".join(_normalize_genres(item.get("genres"))),
         ]
     )
     attr = _pick_amateur_attr(series=series, blob=blob)
-    name = _format_amateur_name_label(names)
-    head = _fit_pipe_lead([series, attr, name])
+    sell_genre = _pick_amateur_sell_genre(item, attr=attr)
+    name = _amateur_name_from_title(core, names)
+    head = _fit_pipe_lead([name, attr, sell_genre, series])
     if _title_already_has_cta(head):
         return _fit_atompub_title(head)
     return _fit_catchy_title(head, "", _CATCHY_CTA)
@@ -1355,8 +1533,8 @@ def blog_post_title_for_item(
     """スマホのカテゴリ新着1行で目立つキャッチタイトルを生成する。
 
     写真集（ebook/photo）は先頭約30字を「人名｜『写真集名』」に固定する。
-    漫画・同人は「作者orサークル｜『作品名』」に固定する。
-    素人AVは「シリーズor属性｜名前」に固定する。
+    漫画・同人は検索向けに「作品名｜作者orサークル｜レビュー」とし、出版社は先頭に出さない。
+    素人AVは「名前｜属性｜シリーズ」に固定する。
     LIVEDOOR_CATCHY_TITLE=0 でオフ（元タイトルのまま）。
     """
     raw = os.environ.get("LIVEDOOR_CATCHY_TITLE", "1").strip().lower()
@@ -1376,14 +1554,14 @@ def blog_post_title_for_item(
             core, names, digital_bonus=bonus
         )
 
-    # 漫画・同人: 販促タグを外し、作者／サークル＋作品名を先頭固定
+    # 漫画・同人: 検索向けに作品名を先頭固定（出版社は出さない）
     if _is_comic_or_doujin_item(item):
         comic_names = _comic_doujin_credit_names(item)
         return _build_comic_mobile_catchy_title(
             core, comic_names, digital_bonus=bonus
         )
 
-    # 素人AV: 名前だけに潰さず、シリーズ／属性を先頭固定
+    # 素人AV: 名前だけに潰さず、名前→属性→シリーズを先頭固定
     if _is_amateur_av_item(item):
         return _build_amateur_av_catchy_title(core, item or {}, names)
 
@@ -2428,6 +2606,9 @@ def _build_digest_sample_affiliate_body(
         raw_c = item_row.get("campaign")
         campaigns = raw_c if isinstance(raw_c, list) else []
     parts: list[str] = []
+    seo_lead = _comic_seo_lead_html(item_row)
+    if seo_lead:
+        parts.append(seo_lead)
     digest_raw = _digest_raw_from_ai_row(ai_review_row) or (review_fallback or "").strip()
     author = _digest_author_review_html(digest_raw)
     if author:
