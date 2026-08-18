@@ -32,7 +32,8 @@ Playwright:
   写真集（ebook floor=photo）のタイトルはカテゴリ新着向けに
     「人名｜『写真集名』｜レビュー」形式へ整形し、先頭約30字に人名＋作品名を固定する。
   漫画・同人（ebook/comic または doujin）は
-    検索流入向けに「作品名｜作者orサークル｜レビュー」とし、出版社を先頭に出さない。
+    検索流入向けに「作品名｜ジャンル｜作者orサークルorメーカー｜レビュー」とし、
+    出版社を先頭に出さない。著者欄が空でもメーカーとジャンルは後ろに付ける。
     巻数は残し、【FANZA限定版】(単話)・モザイク版などは先頭に出さない。
   素人AV（videoc、または videoa で素人シグナルあり）は
     「名前｜属性｜シリーズ｜レビュー」とし、名前だけのタイトルに潰さない。
@@ -134,6 +135,32 @@ _COMIC_PUBLISHER_NAMES = frozenset(
     }
 )
 _COMIC_PUBLISHER_SUFFIXES = ("出版社", "書店", "書房", "文庫", "編集部", "コミックス")
+_COMIC_GENRE_SELL_PRIORITY = (
+    "NTR",
+    "寝取られ",
+    "人妻",
+    "熟女",
+    "近親相姦",
+    "中出し",
+    "巨乳",
+    "痴女",
+    "調教",
+    "学園",
+    "女子校生",
+    "異世界",
+    "ハーレム",
+    "ファンタジー",
+)
+_COMIC_GENRE_SKIP = frozenset(
+    {
+        "AI生成作品",
+        "セット商品",
+        "単話",
+        "コミック",
+        "成人コミック",
+        "成年コミック",
+    }
+)
 _AMATEUR_SIGNAL_RE = re.compile(r"素人|シロウト|しろうと|amateur", re.IGNORECASE)
 _AMATEUR_SERIES_KEYS = ("シロウトTV", "ラグジュTV", "ナンパTV")
 _AMATEUR_ATTR_PRIORITY = (
@@ -1239,7 +1266,7 @@ def _looks_like_publisher(name: str) -> bool:
 
 
 def _comic_doujin_credit_names(item: dict[str, Any] | None) -> list[str]:
-    """漫画は著者のみ（出版社は使わない）。同人はサークル / maker。"""
+    """漫画・同人の後ろクレジット。著者 → サークル → メーカー。"""
     if not item:
         return []
     authors = [
@@ -1249,14 +1276,31 @@ def _comic_doujin_credit_names(item: dict[str, Any] | None) -> list[str]:
     ]
     if authors:
         return authors
-    if _is_doujin_item(item):
-        circles = _parse_credit_names(item.get("circle"))
-        if circles:
-            return circles
-        maker = _item_str(item.get("maker"))
-        if maker:
-            return [maker]
+    circles = _parse_credit_names(item.get("circle"))
+    if circles:
+        return circles
+    maker = _item_str(item.get("maker"))
+    if maker:
+        return [maker]
     return []
+
+
+def _pick_comic_sell_genre(item: dict[str, Any] | None, work: str) -> str:
+    """作品名に含まれない訴求ジャンルを1つ。"""
+    if not item:
+        return ""
+    gs = _normalize_genres(item.get("genres"))
+    if not gs:
+        return ""
+    for key in _COMIC_GENRE_SELL_PRIORITY:
+        if key in _COMIC_GENRE_SKIP:
+            continue
+        if key not in gs:
+            continue
+        if key and key in work:
+            continue
+        return key
+    return ""
 
 
 def _strip_edition_noise(text: str) -> str:
@@ -1315,19 +1359,34 @@ def _comic_work_title(core: str, names: list[str]) -> str:
     return work
 
 
-def _fit_work_first_title(work: str, author: str, tail: str) -> str:
-    """作品名を先頭に置き、AtomPub 上限内に収める。巻数はできるだけ残す。"""
+def _fit_work_first_title(work: str, extras: list[str] | str, tail: str) -> str:
+    """作品名を先頭に置き、AtomPub 上限内に収める。巻数はできるだけ残す。
+
+    extras が溢れるときは先頭（ジャンル）から落とす。作品名とクレジットを優先する。
+    """
     w = (work or "").strip() or "作品"
-    author = (author or "").strip()
-    if author and w.startswith(author):
-        author = ""
-    mid = f"｜{author}" if author else ""
-    candidate = f"{w}{mid}{tail}"
-    if len(candidate) <= _ATOMPUB_TITLE_MAX_CHARS:
-        return candidate
-    candidate = f"{w}{tail}"
-    if len(candidate) <= _ATOMPUB_TITLE_MAX_CHARS:
-        return candidate
+    if isinstance(extras, str):
+        extra_parts = [extras.strip()] if extras.strip() else []
+    else:
+        extra_parts = [(x or "").strip() for x in extras if (x or "").strip()]
+    cleaned: list[str] = []
+    for x in extra_parts:
+        if not x or x in w or w.startswith(x):
+            continue
+        if any(x == y or x in y for y in cleaned):
+            continue
+        cleaned.append(x)
+
+    parts = cleaned[:]
+    while True:
+        mid = "".join(f"｜{x}" for x in parts)
+        candidate = f"{w}{mid}{tail}"
+        if len(candidate) <= _ATOMPUB_TITLE_MAX_CHARS:
+            return candidate
+        if parts:
+            parts.pop(0)
+            continue
+        break
     core, volume = _peel_volume_suffix(w)
     budget = _ATOMPUB_TITLE_MAX_CHARS - len(volume) - len(tail)
     if budget < 2:
@@ -1364,22 +1423,23 @@ def _build_comic_mobile_catchy_title(
     names: list[str],
     *,
     digital_bonus: bool = False,
+    item: dict[str, Any] | None = None,
 ) -> str:
     """漫画・同人向け: 作品名を先頭に固定する（検索・カテゴリ新着の両方）。
 
     形式:
-      通常: {作品名}｜{作者orサークル}｜レビュー
-      電子特典: {作品名}｜{作者orサークル}｜電子特典レビュー
-    出版社名は names に含めない。巻数は作品名側に残す。
+      通常: {作品名}｜{ジャンル}｜{作者orサークルorメーカー}｜レビュー
+      電子特典: 末尾を｜電子特典レビュー
+    出版社・メーカーは先頭に出さず、著者なしのときの後ろクレジットに使う。
     """
-    lead = (names[0] if names else "").strip()
-    if lead and _looks_like_publisher(lead):
-        lead = ""
+    credit = (names[0] if names else "").strip()
     work = _comic_work_title(core, names)
+    genre = _pick_comic_sell_genre(item, work)
+    extras = [x for x in (genre, credit) if x]
     if _title_already_has_cta(work):
-        return _fit_work_first_title(work, lead, "")
+        return _fit_work_first_title(work, extras, "")
     cta = _CATCHY_CTA_PHOTO_BONUS if digital_bonus else _CATCHY_CTA
-    return _fit_work_first_title(work, lead, cta)
+    return _fit_work_first_title(work, extras, cta)
 
 
 def _is_amateur_av_item(item: dict[str, Any] | None) -> bool:
@@ -1533,7 +1593,8 @@ def blog_post_title_for_item(
     """スマホのカテゴリ新着1行で目立つキャッチタイトルを生成する。
 
     写真集（ebook/photo）は先頭約30字を「人名｜『写真集名』」に固定する。
-    漫画・同人は検索向けに「作品名｜作者orサークル｜レビュー」とし、出版社は先頭に出さない。
+    漫画・同人は検索向けに「作品名｜ジャンル｜作者orサークルorメーカー｜レビュー」とし、
+    出版社は先頭に出さない。著者なしでもメーカーとジャンルは後ろに付ける。
     素人AVは「名前｜属性｜シリーズ」に固定する。
     LIVEDOOR_CATCHY_TITLE=0 でオフ（元タイトルのまま）。
     """
@@ -1558,7 +1619,7 @@ def blog_post_title_for_item(
     if _is_comic_or_doujin_item(item):
         comic_names = _comic_doujin_credit_names(item)
         return _build_comic_mobile_catchy_title(
-            core, comic_names, digital_bonus=bonus
+            core, comic_names, digital_bonus=bonus, item=item
         )
 
     # 素人AV: 名前だけに潰さず、名前→属性→シリーズを先頭固定

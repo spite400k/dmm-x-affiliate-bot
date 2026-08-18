@@ -230,7 +230,7 @@ def test_blog_post_title_comic_uses_author_and_work() -> None:
 
 
 def test_blog_post_title_comic_leads_with_work_not_publisher() -> None:
-    """検索流入は作品名。出版社を先頭に出すと Google / カテゴリ新着の両方で負ける。"""
+    """検索流入は作品名。出版社は先頭に出さず、後ろクレジットに残す。"""
     title = "ゾンビのあふれた世界で俺だけが襲われない 4"
     item = {
         "service": "ebook",
@@ -241,11 +241,27 @@ def test_blog_post_title_comic_leads_with_work_not_publisher() -> None:
     got = blog_post_title_for_item(title, item)
     assert got.startswith("ゾンビのあふれた世界で俺だけが襲われない")
     assert "4" in got
-    assert "フロンティアワークス" not in got
+    assert "フロンティアワークス" in got
     assert "…" not in got
     visible = got[:_CATCHY_MOBILE_VISIBLE]
     assert visible.startswith("ゾンビのあふれた")
     assert not visible.startswith("フロンティア")
+
+
+def test_blog_post_title_comic_adds_genre_and_maker_when_no_author() -> None:
+    """著者なしの FANZA コミックは作品名｜ジャンル｜メーカー｜レビュー。"""
+    title = "シングルマザーハウス"
+    item = {
+        "service": "ebook",
+        "floor": "comic",
+        "title": title,
+        "maker": "ヒット出版社",
+        "genres": ["人妻", "中出し", "成年コミック"],
+    }
+    got = blog_post_title_for_item(title, item)
+    assert got == "シングルマザーハウス｜人妻｜ヒット出版社｜レビュー"
+    visible = got[:_CATCHY_MOBILE_VISIBLE]
+    assert visible.startswith("シングルマザーハウス")
 
 
 def test_blog_post_title_comic_keeps_search_query_volume() -> None:
