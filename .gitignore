@@ -3,7 +3,6 @@
 logs/
 *.pyc
 .env
-/state/hanatane_posted.json
 /data/
 *.jpg
 *.png
