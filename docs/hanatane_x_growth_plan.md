@@ -325,3 +325,31 @@ VTuber / Vライバー向け
 - 1週間分の予約投稿文を日付付きで作成
 - デモ動画の台本（秒単位）
 - 「沈黙対策」シリーズを週1に残す場合の切り口一覧
+
+---
+
+## 11. 自動投稿（本リポジトリ）
+
+改善案 §3 に沿った投稿ジョブを追加済み。
+
+| 項目 | 内容 |
+|------|------|
+| エントリ | `python main_hanatane_x.py` |
+| ワークフロー | `.github/workflows/hanatane-x.yml`（JST 21:00 / 手動可） |
+| 主軸 | Discover → 時事ネタカード(A) |
+| 金曜 | 沈黙Tips(D) |
+| 水曜 | デモ動画(C) ※ `HANATANE_DEMO_VIDEO_PATH` 未設定時は A にフォールバック |
+| 土日 | 投稿スキップ（人間味は手動） |
+
+### GitHub Secrets（要登録）
+
+- `API_KEY_HANATANE`
+- `API_SECRET_KEY_HANATANE`
+- `ACCESS_TOKEN_HANATANE`
+- `ACCESS_TOKEN_SECRET_HANATANE`
+- （任意）`BEARER_TOKEN_HANATANE`
+
+### 旧「沈黙対策 #n」自動投稿について
+
+ハナタネアプリ側（`source: …hanatane_ap`）の同文連投は **別系統** の可能性がある。  
+本 bot 導入後は、アプリ内の X 自動投稿を停止し、重複を避けること。
