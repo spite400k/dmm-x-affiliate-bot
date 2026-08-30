@@ -11,10 +11,9 @@ from typing import Any, TypeVar
 logger = logging.getLogger(__name__)
 
 DEFAULT_SEESAA_XMLRPC_URL = "https://blog.seesaa.jp/rpc"
-SEESAA_XMLRPC_FALLBACK_URLS = (
-    "https://blog.seesaa.jp/rpc",
-    "https://ssl.seesaa.jp/blog/rpc",
-)
+# ssl.seesaa.jp/blog/rpc は 2021-02 メンテ以降 405（提供終了）。フォールバックに含めない。
+DEPRECATED_SEESAA_XMLRPC_HOST = "ssl.seesaa.jp"
+SEESAA_XMLRPC_FALLBACK_URLS: tuple[str, ...] = ()
 
 T = TypeVar("T")
 
@@ -47,25 +46,41 @@ def normalize_rpc_url(url: str) -> str:
     return u
 
 
+def is_deprecated_seesaa_rpc_url(url: str) -> bool:
+    """2021 年に提供終了した ssl.seesaa.jp/blog/rpc 等。"""
+    return DEPRECATED_SEESAA_XMLRPC_HOST in normalize_rpc_url(url).lower()
+
+
 def rpc_endpoint_candidates(primary: str) -> list[str]:
     """優先 URL と既知のフォールバックを重複なく返す。"""
     seen: set[str] = set()
     out: list[str] = []
     for u in (primary, *SEESAA_XMLRPC_FALLBACK_URLS):
         n = normalize_rpc_url(u)
-        if n and n not in seen:
-            seen.add(n)
-            out.append(n)
+        if not n or n in seen:
+            continue
+        if is_deprecated_seesaa_rpc_url(n):
+            logger.warning(
+                "Seesaa XML-RPC エンドポイント %s は提供終了しています。"
+                " mst_blog_accounts.xmlrpc_url を %s に設定してください。",
+                n,
+                DEFAULT_SEESAA_XMLRPC_URL,
+            )
+            continue
+        seen.add(n)
+        out.append(n)
     return out
 
 
 def is_seesaa_access_denied(exc: BaseException) -> bool:
-    """クラウド IP ブロック等で 403/401 になるケース。"""
+    """クラウド IP ブロック・提供終了エンドポイント等、再試行すべき HTTP エラー。"""
     if isinstance(exc, xmlrpc.client.ProtocolError):
-        return exc.errcode in (401, 403)
+        return exc.errcode in (401, 403, 405)
     low = str(exc).lower()
-    return "403 forbidden" in low or (
-        "forbidden" in low and "protocolerror" in low
+    return (
+        "403 forbidden" in low
+        or "405 not allowed" in low
+        or ("forbidden" in low and "protocolerror" in low)
     )
 
 
@@ -81,8 +96,9 @@ def seesaa_xmlrpc_call(
     primary_url: str,
     fn: Callable[[xmlrpc.client.ServerProxy], T],
 ) -> T:
-    """複数エンドポイントを順に試す。403 は次の URL へ。"""
+    """複数エンドポイントを順に試す。403/401 は次の URL へ（最後は 403 を優先して送出）。"""
     last: BaseException | None = None
+    access_denied: xmlrpc.client.ProtocolError | None = None
     for url in rpc_endpoint_candidates(primary_url):
         try:
             logger.debug("Seesaa XML-RPC 試行: %s", url)
@@ -90,6 +106,7 @@ def seesaa_xmlrpc_call(
         except xmlrpc.client.ProtocolError as e:
             last = e
             if e.errcode in (401, 403):
+                access_denied = e
                 logger.warning(
                     "Seesaa XML-RPC HTTP %s @ %s — 別エンドポイントを試します",
                     e.errcode,
@@ -97,6 +114,8 @@ def seesaa_xmlrpc_call(
                 )
                 continue
             raise
+    if access_denied is not None:
+        raise access_denied
     if last is not None:
         raise last
     raise RuntimeError("Seesaa XML-RPC: 試行するエンドポイントがありません")

@@ -471,6 +471,8 @@ def run_seesaa_one_item(
                 "Seesaa XML-RPC が拒否されました（HTTP %s %s）。"
                 " GitHub Actions 等のクラウド IP からは 403 になることがあります。"
                 " 自宅 PC・self-hosted runner・ローカル cron での実行を検討してください。"
+                " xmlrpc_url は https://blog.seesaa.jp/rpc のみ有効です"
+                "（ssl.seesaa.jp/blog/rpc は 2021 年に提供終了）。"
                 " 作品はキューから除外しません（次回再試行）。",
                 e.errcode,
                 e.errmsg,

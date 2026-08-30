@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from config.blog_settings import BLOG_ACCOUNT_SETTINGS
 from seesaa_blog.rpc import (
+    is_seesaa_access_denied,
     normalize_rpc_url,
     rpc_endpoint_candidates,
 )
@@ -113,5 +114,16 @@ def test_list_seesaa_blogs_passes_appkey(monkeypatch) -> None:
 def test_seesaa_rpc_endpoint_candidates() -> None:
     assert normalize_rpc_url("https://blog.seesaa.jp/rpc/") == "https://blog.seesaa.jp/rpc"
     urls = rpc_endpoint_candidates("https://blog.seesaa.jp/rpc")
-    assert urls[0] == "https://blog.seesaa.jp/rpc"
-    assert "https://ssl.seesaa.jp/blog/rpc" in urls
+    assert urls == ["https://blog.seesaa.jp/rpc"]
+    assert rpc_endpoint_candidates("https://ssl.seesaa.jp/blog/rpc") == []
+
+
+def test_is_seesaa_access_denied_includes_405() -> None:
+    import xmlrpc.client
+
+    assert is_seesaa_access_denied(
+        xmlrpc.client.ProtocolError("https://ssl.seesaa.jp/blog/rpc", 405, "Not Allowed", {})
+    )
+    assert is_seesaa_access_denied(
+        xmlrpc.client.ProtocolError("https://blog.seesaa.jp/rpc", 403, "Forbidden", {})
+    )

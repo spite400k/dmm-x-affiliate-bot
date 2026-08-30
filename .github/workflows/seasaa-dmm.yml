@@ -32,7 +32,7 @@ jobs:
 
       - name: Run seesaa XML-RPC (DMM のみ。アダルト/FANZA はプログラム側で除外)
         env:
-          # Seesaa WAF 対策（403 時は ssl エンドポイントへ自動フォールバック）
+          # Seesaa WAF 対策（403 はクラウド IP ブロックの可能性。self-hosted runner 推奨）
           SEESAA_XMLRPC_USER_AGENT: Mozilla/5.0 (compatible; dmm-x-affiliate-bot/1.0)
         run: python main_seesaa_blog.py --account 1 --all-targets
 
