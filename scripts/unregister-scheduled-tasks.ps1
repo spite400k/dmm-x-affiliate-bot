@@ -6,22 +6,25 @@ param(
 $ErrorActionPreference = "Stop"
 
 $names = @(
-    "DmmXBot-Livedoor-DMM",
-    "DmmXBot-Livedoor-FANZA",
-    "DmmXBot-Livedoor-Mesugaki",
-    "DmmXBot-Twitter",
-    "DmmXBot-Seesaa-DMM"
+    @{ Name = "DmmXBot-Livedoor-DMM";      TaskPath = "\" }
+    @{ Name = "DmmXBot-Livedoor-FANZA";    TaskPath = "\" }
+    @{ Name = "DmmXBot-Livedoor-Mesugaki"; TaskPath = "\" }
+    @{ Name = "DmmXBot-Twitter";           TaskPath = "\" }
+    @{ Name = "DmmXBot-Seesaa-DMM";        TaskPath = "\dmm\seasaa\" }
+    @{ Name = "DmmXBot-Seesaa-DMM";        TaskPath = "\" }  # legacy location
 )
 
-foreach ($name in $names) {
-    $t = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+foreach ($entry in $names) {
+    $name = $entry.Name
+    $taskPath = $entry.TaskPath
+    $t = Get-ScheduledTask -TaskName $name -TaskPath $taskPath -ErrorAction SilentlyContinue
     if ($t) {
-        Write-Host "remove: $name"
+        Write-Host "remove: ${taskPath}${name}"
         if (-not $WhatIf) {
-            Unregister-ScheduledTask -TaskName $name -Confirm:$false
+            Unregister-ScheduledTask -TaskName $name -TaskPath $taskPath -Confirm:$false
         }
     }
     else {
-        Write-Host "not found: $name"
+        Write-Host "not found: ${taskPath}${name}"
     }
 }

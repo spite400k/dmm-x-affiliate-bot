@@ -18,12 +18,26 @@ if (-not (Test-Path -LiteralPath $HiddenVbs)) {
 }
 
 $tasks = @(
-    @{ Name = "DmmXBot-Livedoor-DMM";      Job = "livedoor-dmm";      Schedule = "Daily";    Time = "20:00" }
-    @{ Name = "DmmXBot-Livedoor-FANZA";    Job = "livedoor-fanza";    Schedule = "Daily";    Time = "20:10" }
-    @{ Name = "DmmXBot-Livedoor-Mesugaki"; Job = "livedoor-mesugaki"; Schedule = "Daily";    Time = "20:20" }
-    @{ Name = "DmmXBot-Twitter";           Job = "twitter";           Schedule = "OnDemand"; Time = $null }
-    @{ Name = "DmmXBot-Seesaa-DMM";        Job = "seesaa-dmm";        Schedule = "OnDemand"; Time = $null }
+    @{ Name = "DmmXBot-Livedoor-DMM";      Job = "livedoor-dmm";      Schedule = "Daily";    Times = @("20:00") }
+    @{ Name = "DmmXBot-Livedoor-FANZA";    Job = "livedoor-fanza";    Schedule = "Daily";    Times = @("20:10") }
+    @{ Name = "DmmXBot-Livedoor-Mesugaki"; Job = "livedoor-mesugaki"; Schedule = "Daily";    Times = @("20:20") }
+    @{ Name = "DmmXBot-Twitter";           Job = "twitter";           Schedule = "OnDemand"; Times = @() }
+    # GHA seasaa-dmm.yml: UTC 03:15 / 11:15 = JST 12:15 / 20:15
+    @{ Name = "DmmXBot-Seesaa-DMM"; Job = "seesaa-dmm"; Schedule = "Daily"; Times = @("12:15", "20:15"); TaskPath = "\dmm\seasaa\" }
 )
+
+function Get-TaskPath([hashtable]$Def) {
+    if ($Def.TaskPath) { return $Def.TaskPath }
+    return "\"
+}
+
+function Remove-RegisteredTask([string]$TaskName, [string]$TaskPath) {
+    $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "remove existing: ${TaskPath}${TaskName}"
+        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
+    }
+}
 
 function New-JobAction([string]$JobName) {
     # wscript + VBS Run(..., 0, True): create process with no console window
@@ -37,11 +51,28 @@ Write-Host ""
 
 foreach ($def in $tasks) {
     $taskName = $def.Name
-    $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($existing) {
-        Write-Host "remove existing: $taskName"
+    $taskPath = Get-TaskPath $def
+
+    # Seesaa などパス移行時: ルート直下の旧タスクを削除
+    if ($taskPath -ne "\") {
         if (-not $WhatIf) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+            Remove-RegisteredTask $taskName "\"
+        }
+        else {
+            $legacy = Get-ScheduledTask -TaskName $taskName -TaskPath "\" -ErrorAction SilentlyContinue
+            if ($legacy) {
+                Write-Host "would remove legacy: \${taskName}"
+            }
+        }
+    }
+
+    if (-not $WhatIf) {
+        Remove-RegisteredTask $taskName $taskPath
+    }
+    else {
+        $existing = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+        if ($existing) {
+            Write-Host "would remove existing: ${taskPath}${taskName}"
         }
     }
 
@@ -54,13 +85,19 @@ foreach ($def in $tasks) {
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
     if ($def.Schedule -eq "Daily") {
-        $trigger = New-ScheduledTaskTrigger -Daily -At $def.Time
-        Write-Host ("register: {0} daily {1} job={2}" -f $taskName, $def.Time, $def.Job)
+        $triggers = @(
+            foreach ($at in $def.Times) {
+                New-ScheduledTaskTrigger -Daily -At $at
+            }
+        )
+        $timesLabel = $def.Times -join ", "
+        Write-Host ("register: {0}{1} daily {2} job={3}" -f $taskPath, $taskName, $timesLabel, $def.Job)
         if (-not $WhatIf) {
             Register-ScheduledTask `
                 -TaskName $taskName `
+                -TaskPath $taskPath `
                 -Action $action `
-                -Trigger $trigger `
+                -Trigger $triggers `
                 -Settings $settings `
                 -Principal $principal `
                 -Description ("dmm-x-affiliate-bot: {0}" -f $def.Job) `
@@ -68,10 +105,11 @@ foreach ($def in $tasks) {
         }
     }
     else {
-        Write-Host ("register: {0} on-demand job={1}" -f $taskName, $def.Job)
+        Write-Host ("register: {0}{1} on-demand job={2}" -f $taskPath, $taskName, $def.Job)
         if (-not $WhatIf) {
             Register-ScheduledTask `
                 -TaskName $taskName `
+                -TaskPath $taskPath `
                 -Action $action `
                 -Settings $settings `
                 -Principal $principal `
@@ -82,6 +120,6 @@ foreach ($def in $tasks) {
 }
 
 Write-Host ""
-Write-Host "done. check: Get-ScheduledTask -TaskName 'DmmXBot-*'"
-Write-Host "run now:   Start-ScheduledTask -TaskName 'DmmXBot-Livedoor-DMM'"
+Write-Host "done. check: Get-ScheduledTask -TaskPath '\dmm\seasaa\'"
+Write-Host "run now:   Start-ScheduledTask -TaskName 'DmmXBot-Seesaa-DMM' -TaskPath '\dmm\seasaa\'"
 Write-Host "logs:      .\logs\<job>-yyyyMMdd-HHmmss.log"

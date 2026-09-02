@@ -1,9 +1,25 @@
 ---
-description: テスト方針
+description: テスト方針（C1 100%）
 alwaysApply: true
 ---
 
 # テスト
 
-- Python: pytest（`tests/`）。機能追加・バグ修正時はテストを追加する。
-- 実行例: `.venv/bin/pytest -q`
+## 目標
+
+- **C1（分岐カバレッジ）100%** — `pytest.ini` の `--cov-branch` と `--cov-fail-under=100` を満たす
+- **ホワイトボックステスト** — 分岐・早期 return・例外を意図的に通す
+- **境界値・限界値テスト** — 空・None・0・1件・最大・不正値を加える
+
+## 実行
+
+- Python: pytest + pytest-cov（`tests/`）
+- 実行例: `.venv/bin/pytest -q` または `.\.venv\Scripts\python.exe -m pytest tests/ -q`
+- `.coveragerc` で `branch = True`、CI で `--cov-branch` 付き coverage を検証
+
+## 方針
+
+- 機能追加・バグ修正時はテストを追加する
+- 外部依存（API, DB）はモックで差し替え
+- 自明なテストは書かない
+- 到達困難な防御コードのみ `# pragma: no cover`（理由コメント必須）
