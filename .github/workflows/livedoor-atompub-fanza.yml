@@ -2,10 +2,11 @@ name: Livedoor blog (AtomPub) FANZA
 
 on:
   schedule:
-    - cron: '0 3 * * *' # 毎日 UTC3時（JST 12時）
-    - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
-    - cron: '0 13 * * *' # 毎日 UTC13時（JST 22時）
-    - cron: '0 15 * * *' # 毎日 UTC15時（JST 24時）
+    # GHA schedule は遅延しやすいため、目標時刻の 3 時間前に起動（分は 0 分以外）
+    - cron: '17 0 * * *' # UTC 0:17（JST 9:17）→ 目標 JST 12:00 頃
+    - cron: '17 8 * * *' # UTC 8:17（JST 17:17）→ 目標 JST 20:00 頃
+    - cron: '17 10 * * *' # UTC 10:17（JST 19:17）→ 目標 JST 22:00 頃
+    - cron: '17 12 * * *' # UTC 12:17（JST 21:17）→ 目標 JST 24:00 頃
   workflow_dispatch:
 
 jobs:
