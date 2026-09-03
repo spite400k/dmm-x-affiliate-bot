@@ -2,8 +2,9 @@ name: Livedoor blog (AtomPub) DMM
 
 on:
   schedule:
-    - cron: '0 3 * * *' # 毎日 UTC3時（JST 12時）
-    - cron: '0 11 * * *' # 毎日 UTC11時（JST 20時）
+    # GHA schedule は遅延しやすいため、目標 JST 12:00 / 20:00 の 3 時間前に起動（分は 0 分以外）
+    - cron: '17 0 * * *' # UTC 0:17（JST 9:17）→ 目標 JST 12:00 頃
+    - cron: '17 8 * * *' # UTC 8:17（JST 17:17）→ 目標 JST 20:00 頃
   workflow_dispatch:
 
 jobs:
