@@ -39,6 +39,30 @@ function Remove-RegisteredTask([string]$TaskName, [string]$TaskPath) {
     }
 }
 
+function Ensure-TaskFolder([string]$TaskPath) {
+    if ($TaskPath -eq "\") { return }
+
+    $parts = $TaskPath.Trim('\').Split('\', [System.StringSplitOptions]::RemoveEmptyEntries)
+    if ($parts.Count -eq 0) { return }
+
+    $service = New-Object -ComObject Schedule.Service
+    $service.Connect()
+    $folder = $service.GetFolder("\")
+    $built = @()
+
+    foreach ($part in $parts) {
+        $built += $part
+        $label = "\" + ($built -join "\") + "\"
+        try {
+            $folder = $folder.GetFolder($part)
+        }
+        catch {
+            $folder = $folder.CreateFolder($part, $null)
+            Write-Host "create folder: $label"
+        }
+    }
+}
+
 function New-JobAction([string]$JobName) {
     # wscript + VBS Run(..., 0, True): create process with no console window
     $arg = "//nologo `"$HiddenVbs`" $JobName"
@@ -93,6 +117,7 @@ foreach ($def in $tasks) {
         $timesLabel = $def.Times -join ", "
         Write-Host ("register: {0}{1} daily {2} job={3}" -f $taskPath, $taskName, $timesLabel, $def.Job)
         if (-not $WhatIf) {
+            Ensure-TaskFolder $taskPath
             Register-ScheduledTask `
                 -TaskName $taskName `
                 -TaskPath $taskPath `
@@ -107,6 +132,7 @@ foreach ($def in $tasks) {
     else {
         Write-Host ("register: {0}{1} on-demand job={2}" -f $taskPath, $taskName, $def.Job)
         if (-not $WhatIf) {
+            Ensure-TaskFolder $taskPath
             Register-ScheduledTask `
                 -TaskName $taskName `
                 -TaskPath $taskPath `
