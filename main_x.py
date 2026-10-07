@@ -15,6 +15,7 @@ from db.post_repository import (
     get_next_x_post,
     mark_post_as_posted,
     mark_post_failed_skip_queue,
+    x_post_status_key,
 )
 from twitter_api.tweet_service import format_campaigns, post_casual_twitter, post_full_twitter
 from utils.logger import setup_logger
@@ -110,12 +111,14 @@ def _exclude_item_after_post_failure(
     item_id: str, account_id: str, screen_name: str
 ) -> None:
     """投稿失敗時にキューから外し、次回は別作品が選ばれるようにする。"""
+    blog_key = x_post_status_key(account_id)
     try:
-        mark_post_failed_skip_queue(item_id, account_id)
+        mark_post_failed_skip_queue(item_id, account_id, blog_key=blog_key)
         logger.info(
-            "投稿失敗のためキューから除外（次回は別作品）: %s - %s",
+            "投稿失敗のためキューから除外（次回は別作品）: %s - %s key=%s",
             screen_name,
             item_id,
+            blog_key,
         )
     except Exception as e:
         logger.error(
@@ -269,19 +272,25 @@ def _post_promo_for_account(account_id: str, config: dict, mode: str) -> None:
         item_id,
     )
 
+    blog_key = x_post_status_key(account_id)
     try:
-        mark_post_as_posted(item_id, account_id)
+        mark_post_as_posted(item_id, account_id, blog_key=blog_key)
         logger.info(
-            "🏁 投稿済みマーク完了: %s - %s",
+            "🏁 投稿済みマーク完了: %s - %s key=%s",
             config.get("screen_name", account_id),
             item_id,
+            blog_key,
         )
     except Exception as e:
+        # is_posted 更新失敗を握りつぶすと同一作品が連投されるため、ジョブを落とす
         logger.error(
             "🚨 投稿済みマーク失敗: %s (%s)",
             config.get("screen_name", account_id),
             e,
         )
+        raise RuntimeError(
+            f"投稿済みマーク失敗（連投防止のため中断）: {item_id} key={blog_key}"
+        ) from e
 
 
 def main() -> None:
