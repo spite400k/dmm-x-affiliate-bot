@@ -8,6 +8,15 @@ _STATUS_TABLE = "trn_dmm_item_blog_post_status"
 _AI_REVIEW_TABLE = "dmm_ai_review_summaries"
 
 
+def x_post_status_key(account_id: str) -> str:
+    """X 投稿済み管理用の blog_key（trn_dmm_item_blog_post_status）。
+
+    trn_dmm_items.is_posted への UPDATE が API キー権限で拒否される環境があるため、
+    ブログ同様に status テーブルでキュー除外する（キー例: x:2）。
+    """
+    return f"x:{account_id}"
+
+
 def _is_missing_table_error(exc: BaseException) -> bool:
     if type(exc).__name__ == "APIError" and exc.args and isinstance(exc.args[0], dict):
         return exc.args[0].get("code") == "PGRST205"
@@ -74,9 +83,9 @@ def get_ai_review_summary(account_id: str, content_id: str) -> dict[str, Any] | 
 def get_next_post(service: str, floor: str, account_id: str, blog_key: str | None = None):
     """未投稿の作品を1件返す。
 
-    blog_key 省略時: trn_dmm_items.is_posted（従来、X / FC2 キュー用）。
-    blog_key 指定時: trn_dmm_item_blog_post_status でそのブログの投稿済みを判定
-    （ライブドアは livedoor:{blog_id} を渡す想定）。
+    blog_key 省略時: trn_dmm_items.is_posted（レガシー。X は x_post_status_key 経由）。
+    blog_key 指定時: trn_dmm_item_blog_post_status でその媒体の投稿済みを判定
+    （livedoor:{blog_id} / x:{account_id} など）。
     """
     supabase = init_supabase(account_id)
     if blog_key is None:
@@ -133,46 +142,16 @@ def get_next_x_post(
 ) -> dict[str, Any] | None:
     """X 用: 未投稿作品を1件返す。
 
+    投稿済み判定は trn_dmm_item_blog_post_status（blog_key=x:{account_id}）。
     prefer_review_digest=True のときは review_digest ありを優先し、
-    見つからなければ従来の get_next_post にフォールバックする。
+    見つからなければ digest 無しの get_next_post にフォールバックする。
     """
+    blog_key = x_post_status_key(account_id)
     if prefer_review_digest:
-        found = _get_next_unposted_with_review_digest(service, floor, account_id)
+        found = get_next_livedoor_post(service, floor, account_id, blog_key)
         if found:
             return found
-    return get_next_post(service, floor, account_id)
-
-
-def _get_next_unposted_with_review_digest(
-    service: str, floor: str, account_id: str
-) -> dict[str, Any] | None:
-    """is_posted=False かつ review_digest がある作品を1件返す。"""
-    supabase = init_supabase(account_id)
-    offset = 0
-    while True:
-        res = (
-            supabase.table("trn_dmm_items")
-            .select("*")
-            .eq("is_posted", False)
-            .eq("service", service)
-            .eq("floor", floor)
-            .gt("review_count", 0)
-            .order("review_count", desc=True)
-            .range(offset, offset + _BATCH - 1)
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
-            return None
-        digest_ids = _content_ids_with_review_digest(
-            account_id,
-            [str(r.get("content_id") or "") for r in rows],
-        )
-        for row in rows:
-            cid = str(row.get("content_id") or "").strip()
-            if cid in digest_ids:
-                return row
-        offset += _BATCH
+    return get_next_post(service, floor, account_id, blog_key=blog_key)
 
 
 def get_next_livedoor_post(

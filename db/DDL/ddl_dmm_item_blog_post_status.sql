@@ -1,4 +1,7 @@
--- ブログ別の投稿済み（trn_dmm_items は作品マスタのまま）
+-- 媒体別の投稿済み（trn_dmm_items は作品マスタのまま）
+-- blog_key 例:
+--   livedoor:{blog_id} / seesaa:... / fc2:...
+--   x:{account_id} … X（Twitter）投稿キュー（main_x.py）
 create table if not exists public.trn_dmm_item_blog_post_status (
   id uuid not null default gen_random_uuid (),
   dmm_item_id uuid not null,
