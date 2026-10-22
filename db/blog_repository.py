@@ -19,6 +19,41 @@ def _is_missing_blog_table_error(exc: BaseException) -> bool:
     return "PGRST205" in text or "Could not find the table" in text
 
 
+def _is_supabase_service_restricted_error(exc: BaseException) -> bool:
+    """Supabase が課金・egress 制限で 402 等を返したとき。
+
+    postgrest は非標準 JSON を一度 ValidationError にしたあと、
+    code=402 の APIError に包むことがある。
+    """
+    if type(exc).__name__ == "APIError" and exc.args and isinstance(exc.args[0], dict):
+        payload = exc.args[0]
+        code = payload.get("code")
+        if code in (402, "402"):
+            return True
+        blob = " ".join(
+            str(payload.get(k) or "") for k in ("message", "hint", "details")
+        )
+        if "exceed_egress_quota" in blob or "spend caps" in blob:
+            return True
+        if "Service for this project is restricted" in blob:
+            return True
+    text = str(exc)
+    return (
+        "exceed_egress_quota" in text
+        or "Service for this project is restricted" in text
+        or ("402" in text and "Payment Required" in text)
+    )
+
+
+def _supabase_restricted_runtime_error(exc: BaseException) -> RuntimeError:
+    return RuntimeError(
+        "Supabase プロジェクトが制限されています"
+        "（HTTP 402 / exceed_egress_quota の可能性）。"
+        " プランのアップグレード、または spend cap の解除が必要です。"
+        f" 詳細: {exc}"
+    )
+
+
 def _pick(row: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = row.get(key)
@@ -76,6 +111,12 @@ def list_enabled_blog_rows(account_id: str, platform: str) -> list[dict[str, Any
                 e,
             )
             return []
+        if _is_supabase_service_restricted_error(e):
+            logger.error(
+                "Supabase が制限応答を返したためブログマスタを取得できません: %s",
+                e,
+            )
+            raise _supabase_restricted_runtime_error(e) from e
         raise
     return list(res.data or [])
 
