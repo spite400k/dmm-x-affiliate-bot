@@ -198,12 +198,17 @@ def get_next_livedoor_post(
 
 
 def _mark_item_removed_from_queue(
-    post_id: str, account_id: str, blog_key: str | None = None
+    post_id: str,
+    account_id: str,
+    blog_key: str | None = None,
+    *,
+    external_ref: str | None = None,
 ) -> None:
     """キューから除外する（成功・失敗で共通）。
 
     blog_key 省略時: trn_dmm_items.is_posted を立てる。
     blog_key 指定時: trn_dmm_item_blog_post_status を更新／挿入。
+    external_ref: 公開記事 URL 等（blog_key 指定時のみ。None なら列を触らない／insert 時は省略）。
     """
     now = datetime.now(timezone.utc).isoformat()
     supabase = init_supabase(account_id)
@@ -212,6 +217,15 @@ def _mark_item_removed_from_queue(
             {"is_posted": True, "posted_at": now}
         ).eq("id", post_id).execute()
         return
+
+    payload: dict[str, Any] = {
+        "is_posted": True,
+        "posted_at": now,
+        "updated_at": now,
+    }
+    ref = (external_ref or "").strip() or None
+    if ref is not None:
+        payload["external_ref"] = ref
 
     existing = (
         supabase.table(_STATUS_TABLE)
@@ -222,26 +236,33 @@ def _mark_item_removed_from_queue(
         .execute()
     )
     if existing.data:
-        supabase.table(_STATUS_TABLE).update(
-            {"is_posted": True, "posted_at": now, "updated_at": now}
-        ).eq("id", existing.data[0]["id"]).execute()
-    else:
-        supabase.table(_STATUS_TABLE).insert(
-            {
-                "dmm_item_id": post_id,
-                "blog_key": blog_key,
-                "is_posted": True,
-                "posted_at": now,
-                "updated_at": now,
-            }
+        supabase.table(_STATUS_TABLE).update(payload).eq(
+            "id", existing.data[0]["id"]
         ).execute()
+    else:
+        insert_row: dict[str, Any] = {
+            "dmm_item_id": post_id,
+            "blog_key": blog_key,
+            "is_posted": True,
+            "posted_at": now,
+            "updated_at": now,
+        }
+        if ref is not None:
+            insert_row["external_ref"] = ref
+        supabase.table(_STATUS_TABLE).insert(insert_row).execute()
 
 
 def mark_post_as_posted(
-    post_id: str, account_id: str, blog_key: str | None = None
+    post_id: str,
+    account_id: str,
+    blog_key: str | None = None,
+    *,
+    external_ref: str | None = None,
 ) -> None:
-    """投稿成功時。キューから除外する。"""
-    _mark_item_removed_from_queue(post_id, account_id, blog_key=blog_key)
+    """投稿成功時。キューから除外する。external_ref に公開 URL を渡せる。"""
+    _mark_item_removed_from_queue(
+        post_id, account_id, blog_key=blog_key, external_ref=external_ref
+    )
 
 
 def mark_post_failed_skip_queue(
@@ -249,3 +270,97 @@ def mark_post_failed_skip_queue(
 ) -> None:
     """post_full_twitter 失敗時。同一作品の再取得を防ぐためキューから除外する（次回は別作品）。"""
     _mark_item_removed_from_queue(post_id, account_id, blog_key=blog_key)
+
+
+def list_related_blog_posts(
+    account_id: str,
+    blog_key: str,
+    current_item: dict[str, Any],
+    *,
+    limit: int | None = None,
+    pool_size: int | None = None,
+) -> list[dict[str, str]]:
+    """同一 blog_key の投稿済み（external_ref あり）から関連記事を返す。
+
+    戻り値: [{title, url, dmm_item_id}, ...]
+    """
+    from livedoor_blog.internal_links import (
+        pick_related_posts,
+        related_posts_enabled,
+        related_posts_limit,
+        related_posts_pool_size,
+    )
+
+    if not related_posts_enabled():
+        return []
+    key = (blog_key or "").strip()
+    if not key:
+        return []
+    lim = related_posts_limit() if limit is None else limit
+    pool = related_posts_pool_size() if pool_size is None else max(lim, int(pool_size))
+
+    supabase = init_supabase(account_id)
+    try:
+        status_res = (
+            supabase.table(_STATUS_TABLE)
+            .select("dmm_item_id, external_ref, posted_at")
+            .eq("blog_key", key)
+            .eq("is_posted", True)
+            .not_.is_("external_ref", "null")
+            .order("posted_at", desc=True)
+            .limit(pool)
+            .execute()
+        )
+    except Exception:
+        # PostgREST によっては not_.is_ が使えない環境向けにフォールバック
+        status_res = (
+            supabase.table(_STATUS_TABLE)
+            .select("dmm_item_id, external_ref, posted_at")
+            .eq("blog_key", key)
+            .eq("is_posted", True)
+            .order("posted_at", desc=True)
+            .limit(pool * 2)
+            .execute()
+        )
+
+    status_rows = [
+        r
+        for r in (status_res.data or [])
+        if str(r.get("external_ref") or "").strip()
+    ][:pool]
+    if not status_rows:
+        return []
+
+    ids = [str(r["dmm_item_id"]) for r in status_rows if r.get("dmm_item_id")]
+    exclude = str(current_item.get("id") or "").strip()
+    ids = [i for i in ids if i and i != exclude]
+    if not ids:
+        return []
+
+    items_res = (
+        supabase.table("trn_dmm_items")
+        .select("id, title, series, actress, author, maker, genres")
+        .in_("id", ids)
+        .execute()
+    )
+    by_id = {str(r.get("id")): r for r in (items_res.data or [])}
+    posted_by_id = {
+        str(r.get("dmm_item_id")): r for r in status_rows if r.get("dmm_item_id")
+    }
+
+    candidates: list[dict[str, Any]] = []
+    for item_id in ids:
+        item = by_id.get(item_id)
+        st = posted_by_id.get(item_id)
+        if not item or not st:
+            continue
+        url = str(st.get("external_ref") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if not url or not title:
+            continue
+        merged = dict(item)
+        merged["url"] = url
+        merged["posted_at"] = st.get("posted_at") or ""
+        candidates.append(merged)
+
+    return pick_related_posts(candidates, current_item, limit=lim)

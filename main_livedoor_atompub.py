@@ -13,7 +13,8 @@
   3) mst_blog_accounts（platform=livedoor, enabled=true）の各行の site / service / floor に応じて
      未投稿キューを取得し livedoor.blogcms.jp へ AtomPub POST。
      本文は ①review_digest → ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク
-     → ⑤プレミアム宣伝（site/account 別・URL 設定時のみ） の順。
+     → ⑤プレミアム宣伝（site/account 別・URL 設定時のみ）
+     → ⑥同ブログ関連記事 → ⑦FANZA ジャンルハブ（設定時） の順。
      行に service/floor が無い場合のみ、BLOG_ACCOUNT_SETTINGS の targets（または先頭行の service/floor）にフォールバック。
      --all-targets で複数行を順に試行（DRY_RUN 時も全ターゲットを試し、最初の成功で打ち切らない）
 
@@ -21,6 +22,7 @@
   SUPABASE_URL_{ACCOUNT}, SUPABASE_KEY_{ACCOUNT}（ACCOUNT は既定 1 → _1）
   LIVEDOOR_ARTICLE_STYLE=popular …長文レビュー風 HTML（simple で従来どおり）
   LIVEDOOR_CATCHY_TITLE=1 …スマホ新着向けに「出演者｜フック｜レビュー」形式へ整形（0 でオフ）
+  LIVEDOOR_RELATED_POSTS=1 / LIVEDOOR_GENRE_HUB=1 …内部リンク（0 でオフ）
 
 使用例:
   python main_livedoor_atompub.py --service ebook --floor comic
@@ -61,11 +63,18 @@ from config.blog_settings import BLOG_ACCOUNT_SETTINGS
 from db.blog_repository import (
     apply_livedoor_env_from_config,
     list_enabled_livedoor_blog_configs,
+    list_livedoor_hub_blog_rows,
 )
 from db.post_repository import (
     get_ai_review_summary,
     get_next_livedoor_post,
+    list_related_blog_posts,
     mark_post_as_posted,
+)
+from livedoor_blog.internal_links import (
+    build_genre_hub_items,
+    default_genre_label,
+    genre_hub_enabled,
 )
 from livedoor_blog.post import (
     blog_post_title_for_item,
@@ -116,6 +125,46 @@ def _livedoor_rows_with_service_floor(
     return out
 
 
+def _resolve_genre_hub_for_post(
+    ld_cfg: dict[str, str] | None,
+    all_ld_rows: list[dict[str, str]] | None,
+    *,
+    site_portal: str,
+    floor: str,
+) -> list[dict[str, str]]:
+    """FANZA かつ hub 設定があるときだけジャンルハブ項目を返す。"""
+    if not genre_hub_enabled() or site_portal != "fanza":
+        return []
+    rows = all_ld_rows or []
+    hub_group = ""
+    if ld_cfg:
+        hub_group = str(ld_cfg.get("hub_group") or "").strip()
+    if not hub_group:
+        # 同一 account の fanza ハブ行があればそれを使う
+        for r in rows:
+            g = str(r.get("hub_group") or "").strip()
+            if g:
+                hub_group = g
+                break
+    if not hub_group:
+        return []
+    hub_rows = list_livedoor_hub_blog_rows(rows, hub_group=hub_group)
+    cur_label = ""
+    if ld_cfg:
+        cur_label = str(ld_cfg.get("genre_label") or "").strip() or default_genre_label(
+            ld_cfg.get("floor") or floor
+        )
+    else:
+        cur_label = default_genre_label(floor)
+    return build_genre_hub_items(
+        hub_rows,
+        current_floor=str(
+            (ld_cfg or {}).get("floor") or floor or ""
+        ).strip(),
+        current_label=cur_label,
+    )
+
+
 def run_livedoor_one_item(
     account_id: str,
     service: str,
@@ -125,6 +174,8 @@ def run_livedoor_one_item(
     *,
     dry: bool,
     no_mark_posted: bool,
+    ld_cfg: dict[str, str] | None = None,
+    all_ld_rows: list[dict[str, str]] | None = None,
 ) -> bool:
     """Supabase から1件取り AtomPub 投稿する。投稿または DRY プレビューができれば True。"""
     post = get_next_livedoor_post(
@@ -185,6 +236,19 @@ def run_livedoor_one_item(
         campaigns,
         affiliate_url,
     )
+    related_posts: list[dict[str, str]] = []
+    try:
+        related_posts = list_related_blog_posts(
+            account_id, blog_key_for_status, post
+        )
+    except Exception as e:
+        logger.warning("関連記事の取得に失敗（本文は続行）: %s", e)
+    genre_hub_items = _resolve_genre_hub_for_post(
+        ld_cfg,
+        all_ld_rows,
+        site_portal=site_portal,
+        floor=floor,
+    )
     body_html = build_livedoor_blog_html(
         title=display_title,
         twitter_text=twitter_text,
@@ -200,6 +264,8 @@ def run_livedoor_one_item(
         ai_review_row=ai_review,
         account_id=account_id,
         portal_site=site_portal,
+        related_posts=related_posts,
+        genre_hub_items=genre_hub_items,
     )
     logger.info(
         "Supabase 取得: %s - %s（投稿タイトル: %s）",
@@ -212,11 +278,13 @@ def run_livedoor_one_item(
         logger.info("DRY_RUN: 送信せず本文先頭800文字:\n%s", body_html[:8000])
         return True
 
+    public_base = str((ld_cfg or {}).get("public_base_url") or "").strip()
     try:
-        post_to_livedoor_blog(
+        public_url = post_to_livedoor_blog(
             display_title,
             body_html,
             title_fallback=raw_title or f"作品レビュー {content_id}",
+            public_base_url=public_base,
         )
     except Exception as e:
         logger.exception("投稿に失敗しました: %s", e)
@@ -224,8 +292,17 @@ def run_livedoor_one_item(
 
     if not no_mark_posted:
         try:
-            mark_post_as_posted(item_id, account_id, blog_key=blog_key_for_status)
-            logger.info("Supabase 投稿済みマーク: %s", item_id)
+            mark_post_as_posted(
+                item_id,
+                account_id,
+                blog_key=blog_key_for_status,
+                external_ref=public_url,
+            )
+            logger.info(
+                "Supabase 投稿済みマーク: %s external_ref=%s",
+                item_id,
+                public_url or "(なし)",
+            )
         except Exception as e:
             logger.exception("投稿済みマークに失敗しました（ブログは投稿済み）: %s", e)
             sys.exit(1)
@@ -405,6 +482,8 @@ def main() -> None:
                         ld_cfg["blog_key"],
                         dry=dry,
                         no_mark_posted=args.no_mark_posted,
+                        ld_cfg=ld_cfg,
+                        all_ld_rows=ld_rows,
                     ):
                         any_done = True
                 if not any_done:
@@ -438,6 +517,8 @@ def main() -> None:
                     bk0,
                     dry=dry,
                     no_mark_posted=args.no_mark_posted,
+                    ld_cfg=ld_rows[0],
+                    all_ld_rows=ld_rows,
                 ):
                     any_done = True
             if not any_done:
@@ -478,6 +559,8 @@ def main() -> None:
             ld_cfg["blog_key"],
             dry=dry,
             no_mark_posted=args.no_mark_posted,
+            ld_cfg=ld_cfg,
+            all_ld_rows=ld_rows,
         )
         if dry and ok:
             sys.exit(0)
