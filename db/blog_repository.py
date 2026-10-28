@@ -252,7 +252,14 @@ def _livedoor_row_to_config(row: dict[str, Any]) -> dict[str, str] | None:
     }
     if basic_user:
         out["atompub_basic_username"] = basic_user
-    for k in ("site", "service", "floor"):
+    for k in (
+        "site",
+        "service",
+        "floor",
+        "public_base_url",
+        "genre_label",
+        "hub_group",
+    ):
         v = str(row.get(k) or "").strip()
         if v:
             out[k] = v
@@ -264,12 +271,49 @@ def list_enabled_livedoor_blog_configs(account_id: str) -> list[dict[str, str]]:
 
     各行に site / service / floor があれば、main_livedoor_atompub がその組み合わせで
     未投稿キューを参照するのに使う。必須列欠けの行はスキップする。
+    任意: public_base_url / genre_label / hub_group（FANZA ジャンルハブ用）。
     """
     out: list[dict[str, str]] = []
     for row in list_enabled_blog_rows(account_id, "livedoor"):
         cfg = _livedoor_row_to_config(row)
         if cfg:
             out.append(cfg)
+    return out
+
+
+def list_livedoor_hub_blog_rows(
+    configs: list[dict[str, str]],
+    *,
+    hub_group: str = "fanza",
+) -> list[dict[str, str]]:
+    """同一 hub_group のライブドア設定からジャンルハブ候補を返す。
+
+    各要素: genre_label, public_base_url, floor, blog_id
+    """
+    from livedoor_blog.internal_links import default_genre_label
+
+    group = (hub_group or "").strip().lower()
+    if not group:
+        return []
+    out: list[dict[str, str]] = []
+    for cfg in configs:
+        if str(cfg.get("hub_group") or "").strip().lower() != group:
+            continue
+        base = str(cfg.get("public_base_url") or "").strip()
+        if not base:
+            continue
+        floor = str(cfg.get("floor") or "").strip()
+        label = str(cfg.get("genre_label") or "").strip() or default_genre_label(floor)
+        if not label:
+            continue
+        out.append(
+            {
+                "genre_label": label,
+                "public_base_url": base,
+                "floor": floor,
+                "blog_id": str(cfg.get("blog_id") or "").strip(),
+            }
+        )
     return out
 
 
@@ -301,3 +345,8 @@ def apply_livedoor_env_from_config(cfg: dict[str, str]) -> None:
         os.environ["LIVEDOOR_ATOMPUB_BASIC_USER"] = bu
     else:
         os.environ.pop("LIVEDOOR_ATOMPUB_BASIC_USER", None)
+    public_base = str(cfg.get("public_base_url") or "").strip()
+    if public_base:
+        os.environ["LIVEDOOR_PUBLIC_BASE_URL"] = public_base
+    else:
+        os.environ.pop("LIVEDOOR_PUBLIC_BASE_URL", None)

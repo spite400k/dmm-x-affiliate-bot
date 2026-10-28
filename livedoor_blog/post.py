@@ -37,10 +37,12 @@ Playwright:
     巻数は残し、【FANZA限定版】(単話)・モザイク版などは先頭に出さない。
   素人AV（videoc、または videoa で素人シグナルあり）は
     「名前｜属性｜シリーズ｜レビュー」とし、種別語は付けない。
-  プロAV（videoa）は末尾に「AV」、小説は「小説」、実用書は「実用書」、アニメは「アニメ」。
+    プロAV（videoa）は末尾に「AV」、小説は「小説」、実用書は「実用書」、アニメは「アニメ」。
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
   account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
+  related_posts / genre_hub_items を渡すと⑥関連記事・⑦FANZAジャンルハブを末尾に付ける
+  （docs/livedoor-internal-links-design.md）。
 """
 
 from __future__ import annotations
@@ -2758,8 +2760,15 @@ def _build_digest_sample_affiliate_body(
     campaigns: list | None = None,
     account_id: str | None = None,
     portal_site: str | None = None,
+    related_posts: list[dict[str, str]] | None = None,
+    genre_hub_items: list[dict[str, str]] | None = None,
 ) -> str:
-    """本文コア: ①筆者レビュー → 立ち読み → ②パッケージ → サンプル動画(FANZA) → ③画像 → ④CTA → ⑤プレミアム。"""
+    """本文コア: ①〜⑤ + ⑥関連記事 + ⑦ジャンルハブ。"""
+    from livedoor_blog.internal_links import (
+        genre_hub_section_html,
+        related_posts_section_html,
+    )
+
     if campaigns is None and item_row:
         raw_c = item_row.get("campaign")
         campaigns = raw_c if isinstance(raw_c, list) else []
@@ -2806,6 +2815,12 @@ def _build_digest_sample_affiliate_body(
     )
     if premium:
         parts.append(premium)
+    related = related_posts_section_html(related_posts)
+    if related:
+        parts.append(related)
+    hub = genre_hub_section_html(genre_hub_items)
+    if hub:
+        parts.append(hub)
     return "\n".join(parts)
 
 
@@ -2844,6 +2859,8 @@ def _build_simple_livedoor_html(
     campaigns: list | None = None,
     account_id: str | None = None,
     portal_site: str | None = None,
+    related_posts: list[dict[str, str]] | None = None,
+    genre_hub_items: list[dict[str, str]] | None = None,
 ) -> str:
     # タイトルは Atom <title> で既に表示されるため本文では繰り返さない
     return _build_digest_sample_affiliate_body(
@@ -2858,6 +2875,8 @@ def _build_simple_livedoor_html(
         campaigns=campaigns,
         account_id=account_id,
         portal_site=portal_site,
+        related_posts=related_posts,
+        genre_hub_items=genre_hub_items,
     )
 
 
@@ -2877,6 +2896,8 @@ def _build_popular_livedoor_html(
     campaigns: list | None = None,
     account_id: str | None = None,
     portal_site: str | None = None,
+    related_posts: list[dict[str, str]] | None = None,
+    genre_hub_items: list[dict[str, str]] | None = None,
 ) -> str:
     """digest_raw 筆者レビュー → パッケージ画像 → サンプル画像 → アフィリエイト（PR 注記付き）。"""
     body = _build_digest_sample_affiliate_body(
@@ -2894,6 +2915,8 @@ def _build_popular_livedoor_html(
         campaigns=campaigns,
         account_id=account_id,
         portal_site=portal_site,
+        related_posts=related_posts,
+        genre_hub_items=genre_hub_items,
     )
     return "\n".join(
         [
@@ -2923,6 +2946,8 @@ def build_livedoor_blog_html(
     ai_review_row: dict[str, Any] | None = None,
     account_id: str | None = None,
     portal_site: str | None = None,
+    related_posts: list[dict[str, str]] | None = None,
+    genre_hub_items: list[dict[str, str]] | None = None,
 ) -> str:
     """item_row / ai_review_row に DB 行を渡すと、作品スペックと AI レビュー要約を本文に展開する。"""
     style = _article_style(article_style)
@@ -2942,6 +2967,8 @@ def build_livedoor_blog_html(
             campaigns=campaigns,
             account_id=account_id,
             portal_site=portal_site,
+            related_posts=related_posts,
+            genre_hub_items=genre_hub_items,
         )
     return _build_simple_livedoor_html(
         title=title,
@@ -2955,6 +2982,8 @@ def build_livedoor_blog_html(
         campaigns=campaigns,
         account_id=account_id,
         portal_site=portal_site,
+        related_posts=related_posts,
+        genre_hub_items=genre_hub_items,
     )
 
 
@@ -3001,8 +3030,15 @@ def _build_atom_entry_xml(title: str, body_html: str, draft: bool) -> bytes:
 
 
 def _post_atompub(
-    title: str, body_html: str, *, title_fallback: str = ""
-) -> None:
+    title: str,
+    body_html: str,
+    *,
+    title_fallback: str = "",
+    public_base_url: str = "",
+) -> str | None:
+    """AtomPub で投稿し、公開記事 URL（取れなければ None）を返す。"""
+    from livedoor_blog.internal_links import parse_atompub_public_url
+
     blog_name = os.environ["LIVEDOOR_BLOG_NAME"].strip()
     livedoor_id = os.environ["LIVEDOOR_ID"].strip()
     basic_user = os.environ.get("LIVEDOOR_ATOMPUB_BASIC_USER", "").strip() or livedoor_id
@@ -3048,6 +3084,19 @@ def _post_atompub(
                 (title_fallback or "")[:80],
             )
     r.raise_for_status()
+    if draft:
+        return None
+    public_url = parse_atompub_public_url(
+        r.text,
+        public_base_url=public_base_url
+        or os.environ.get("LIVEDOOR_PUBLIC_BASE_URL", "").strip(),
+        blog_name=blog_name,
+    )
+    if not public_url:
+        logger.warning(
+            "AtomPub 成功したが公開 URL を抽出できませんでした（external_ref は未設定）"
+        )
+    return public_url
 
 
 def _fill_first_visible(
@@ -3161,16 +3210,26 @@ def _post_playwright(title: str, body_html: str) -> None:
 
 
 def post_to_livedoor_blog(
-    title: str, body_html: str, *, title_fallback: str = ""
-) -> None:
+    title: str,
+    body_html: str,
+    *,
+    title_fallback: str = "",
+    public_base_url: str = "",
+) -> str | None:
+    """投稿する。AtomPub 時は公開 URL（不明・draft・無効時は None）を返す。"""
     if not is_livedoor_blog_enabled():
-        return
+        return None
     method = _post_method()
     if method == "playwright":
         _post_playwright(title, body_html)
-        return
+        return None
     if method != "atompub":
         raise ValueError(
             f"不明な LIVEDOOR_POST_METHOD: {method!r}（atompub または playwright）"
         )
-    _post_atompub(title, body_html, title_fallback=title_fallback)
+    return _post_atompub(
+        title,
+        body_html,
+        title_fallback=title_fallback,
+        public_base_url=public_base_url,
+    )
