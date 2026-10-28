@@ -211,7 +211,102 @@ def test_genre_hub_hidden_when_only_current() -> None:
 def test_default_genre_label() -> None:
     assert default_genre_label("comic") == "コミック"
     assert default_genre_label("digital_doujin") == "同人誌"
+    assert default_genre_label("photo") == "写真集"
+    assert default_genre_label("novel") == "小説"
     assert default_genre_label("unknown") == ""
+
+
+def test_resolve_genre_hub_for_dmm() -> None:
+    from main_livedoor_atompub import _resolve_genre_hub_for_post
+
+    rows = [
+        {
+            "blog_id": "spite400k",
+            "floor": "comic",
+            "hub_group": "dmm",
+            "genre_label": "コミック",
+            "public_base_url": "https://blog.livedoor.jp/spite400k/",
+        },
+        {
+            "blog_id": "spite400k-hp7qpmu3",
+            "floor": "photo",
+            "hub_group": "dmm",
+            "genre_label": "写真集",
+            "public_base_url": "https://blog.livedoor.jp/spite400k-hp7qpmu3/",
+        },
+        {
+            "blog_id": "fanza-av",
+            "floor": "videoa",
+            "hub_group": "fanza",
+            "genre_label": "AV",
+            "public_base_url": "https://blog.livedoor.jp/fanza-av/",
+        },
+    ]
+    items = _resolve_genre_hub_for_post(
+        rows[1],
+        rows,
+        site_portal="dmm",
+        floor="photo",
+    )
+    assert len(items) == 2
+    by_label = {x["label"]: x["url"] for x in items}
+    assert by_label["写真集"] == ""
+    assert by_label["コミック"] == "https://blog.livedoor.jp/spite400k/"
+    assert "AV" not in by_label
+
+
+def test_resolve_genre_hub_prefers_matching_site_group() -> None:
+    from main_livedoor_atompub import _resolve_genre_hub_for_post
+
+    rows = [
+        {
+            "blog_id": "a",
+            "floor": "videoa",
+            "hub_group": "fanza",
+            "public_base_url": "https://blog.livedoor.jp/a/",
+        },
+        {
+            "blog_id": "b",
+            "floor": "videoc",
+            "hub_group": "fanza",
+            "public_base_url": "https://blog.livedoor.jp/b/",
+        },
+        {
+            "blog_id": "c",
+            "floor": "comic",
+            "hub_group": "dmm",
+            "public_base_url": "https://blog.livedoor.jp/c/",
+        },
+        {
+            "blog_id": "d",
+            "floor": "photo",
+            "hub_group": "dmm",
+            "public_base_url": "https://blog.livedoor.jp/d/",
+        },
+    ]
+    # ld_cfg に hub_group が無くても site_portal=dmm なら dmm グループを選ぶ
+    items = _resolve_genre_hub_for_post(
+        {"floor": "comic", "blog_id": "c"},
+        rows,
+        site_portal="dmm",
+        floor="comic",
+    )
+    labels = {x["label"] for x in items}
+    assert labels == {"コミック", "写真集"}
+
+
+def test_resolve_genre_hub_empty_without_hub_group() -> None:
+    from main_livedoor_atompub import _resolve_genre_hub_for_post
+
+    assert (
+        _resolve_genre_hub_for_post(
+            {"floor": "comic"},
+            [{"floor": "comic", "public_base_url": "https://blog.livedoor.jp/x/"}],
+            site_portal="dmm",
+            floor="comic",
+        )
+        == []
+    )
 
 
 def test_list_livedoor_hub_blog_rows() -> None:
