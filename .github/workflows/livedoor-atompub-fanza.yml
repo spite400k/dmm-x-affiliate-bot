@@ -3,10 +3,13 @@ name: Livedoor blog (AtomPub) FANZA
 on:
   schedule:
     # GHA schedule は遅延しやすいため、目標時刻の 3 時間前に起動（分は 0 分以外）
+    # 1日6回。目標は JST 4:00 / 8:00 / 12:00 / 16:00 / 20:00 / 24:00（4時間間隔）
     - cron: '17 0 * * *' # UTC 0:17（JST 9:17）→ 目標 JST 12:00 頃
+    - cron: '17 4 * * *' # UTC 4:17（JST 13:17）→ 目標 JST 16:00 頃
     - cron: '17 8 * * *' # UTC 8:17（JST 17:17）→ 目標 JST 20:00 頃
-    - cron: '17 10 * * *' # UTC 10:17（JST 19:17）→ 目標 JST 22:00 頃
     - cron: '17 12 * * *' # UTC 12:17（JST 21:17）→ 目標 JST 24:00 頃
+    - cron: '17 16 * * *' # UTC 16:17（JST 1:17）→ 目標 JST 4:00 頃
+    - cron: '17 20 * * *' # UTC 20:17（JST 5:17）→ 目標 JST 8:00 頃
   workflow_dispatch:
 
 jobs:
