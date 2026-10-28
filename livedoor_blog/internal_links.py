@@ -1,6 +1,7 @@
-"""ライブドア記事の内部リンク（関連記事・FANZAジャンルハブ）。
+"""ライブドア記事の内部リンク（関連記事・ジャンルハブ）。
 
 docs/livedoor-internal-links-design.md 参照。
+ハブは hub_group（例: fanza / dmm）単位。site 限定ではない。
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ DEFAULT_GENRE_LABEL_BY_FLOOR: dict[str, str] = {
     "digital_doujin": "同人誌",
     "videoa": "AV",
     "videoc": "素人",
+    "photo": "写真集",
+    "novel": "小説",
 }
 
 _RE_LINK_ALTERNATE = re.compile(

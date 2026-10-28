@@ -41,8 +41,8 @@ Playwright:
   build_livedoor_blog_html(item_row=…) に trn_dmm_items を渡すとサンプル画像を展開する。
   ai_review_row=… に dmm_ai_review_summaries を渡すと review_digest を筆者レビューに使う。
   account_id / portal_site を渡すと config.blog_settings.resolve_premium_promo で⑤を出し分ける。
-  related_posts / genre_hub_items を渡すと⑥関連記事・⑦FANZAジャンルハブを末尾に付ける
-  （docs/livedoor-internal-links-design.md）。
+  related_posts / genre_hub_items を渡すと⑥関連記事・⑦ジャンルハブを末尾に付ける
+  （hub_group=dmm/fanza など。docs/livedoor-internal-links-design.md）。
 """
 
 from __future__ import annotations
