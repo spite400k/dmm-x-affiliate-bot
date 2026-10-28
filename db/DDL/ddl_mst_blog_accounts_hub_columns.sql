@@ -19,9 +19,45 @@ comment on column public.mst_blog_accounts.genre_label is
 comment on column public.mst_blog_accounts.hub_group is
   '同一ハブに載せるグループ（例: fanza）。空ならハブ対象外';
 
--- 例（blog_id / URL は実環境に合わせて書き換える）:
--- update public.mst_blog_accounts
---   set public_base_url = 'https://blog.livedoor.jp/example-comic/',
---       genre_label = 'コミック',
---       hub_group = 'fanza'
--- where platform = 'livedoor' and account_id = '2' and floor = 'comic';
+-- FANZA ジャンルハブ値入れ（account_id=2 想定。blog_id から TOP URL を組み立てる）
+-- カスタムドメインのときは public_base_url を手で書き換える。
+
+-- AV
+update public.mst_blog_accounts
+set
+  public_base_url = 'https://blog.livedoor.jp/' || blog_id || '/',
+  genre_label = 'AV',
+  hub_group = 'fanza'
+where platform = 'livedoor'
+  and account_id = '2'
+  and floor = 'videoa';
+
+-- コミック
+update public.mst_blog_accounts
+set
+  public_base_url = 'https://blog.livedoor.jp/' || blog_id || '/',
+  genre_label = 'コミック',
+  hub_group = 'fanza'
+where platform = 'livedoor'
+  and account_id = '2'
+  and floor = 'comic';
+
+-- 同人誌
+update public.mst_blog_accounts
+set
+  public_base_url = 'https://blog.livedoor.jp/' || blog_id || '/',
+  genre_label = '同人誌',
+  hub_group = 'fanza'
+where platform = 'livedoor'
+  and account_id = '2'
+  and floor = 'digital_doujin';
+
+-- 素人
+update public.mst_blog_accounts
+set
+  public_base_url = 'https://blog.livedoor.jp/' || blog_id || '/',
+  genre_label = '素人',
+  hub_group = 'fanza'
+where platform = 'livedoor'
+  and account_id = '2'
+  and floor = 'videoc';
