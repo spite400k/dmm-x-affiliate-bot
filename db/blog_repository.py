@@ -271,7 +271,7 @@ def list_enabled_livedoor_blog_configs(account_id: str) -> list[dict[str, str]]:
 
     各行に site / service / floor があれば、main_livedoor_atompub がその組み合わせで
     未投稿キューを参照するのに使う。必須列欠けの行はスキップする。
-    任意: public_base_url / genre_label / hub_group（FANZA ジャンルハブ用）。
+    任意: public_base_url / genre_label / hub_group（ジャンルハブ用。dmm/fanza など）。
     """
     out: list[dict[str, str]] = []
     for row in list_enabled_blog_rows(account_id, "livedoor"):

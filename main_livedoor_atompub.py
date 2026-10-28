@@ -14,7 +14,7 @@
      未投稿キューを取得し livedoor.blogcms.jp へ AtomPub POST。
      本文は ①review_digest → ②パッケージ画像 → ③サンプル画像 → ④ポータル（アフィリエイト）リンク
      → ⑤プレミアム宣伝（site/account 別・URL 設定時のみ）
-     → ⑥同ブログ関連記事 → ⑦FANZA ジャンルハブ（設定時） の順。
+     → ⑥同ブログ関連記事 → ⑦ジャンルハブ（hub_group 設定時・dmm/fanza 可） の順。
      行に service/floor が無い場合のみ、BLOG_ACCOUNT_SETTINGS の targets（または先頭行の service/floor）にフォールバック。
      --all-targets で複数行を順に試行（DRY_RUN 時も全ターゲットを試し、最初の成功で打ち切らない）
 
@@ -132,20 +132,27 @@ def _resolve_genre_hub_for_post(
     site_portal: str,
     floor: str,
 ) -> list[dict[str, str]]:
-    """FANZA かつ hub 設定があるときだけジャンルハブ項目を返す。"""
-    if not genre_hub_enabled() or site_portal != "fanza":
+    """hub_group 設定があるときジャンルハブ項目を返す（dmm / fanza 共通）。"""
+    if not genre_hub_enabled():
         return []
     rows = all_ld_rows or []
     hub_group = ""
     if ld_cfg:
         hub_group = str(ld_cfg.get("hub_group") or "").strip()
+    preferred = str(site_portal or "").strip().lower()
     if not hub_group:
-        # 同一 account の fanza ハブ行があればそれを使う
+        # site（dmm/fanza）と同名の hub_group を優先し、無ければ最初の非空
         for r in rows:
             g = str(r.get("hub_group") or "").strip()
-            if g:
+            if g and preferred and g.lower() == preferred:
                 hub_group = g
                 break
+        if not hub_group:
+            for r in rows:
+                g = str(r.get("hub_group") or "").strip()
+                if g:
+                    hub_group = g
+                    break
     if not hub_group:
         return []
     hub_rows = list_livedoor_hub_blog_rows(rows, hub_group=hub_group)
